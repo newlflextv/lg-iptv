@@ -197,6 +197,7 @@ function paintRailFocus() {
   }
   railIndex = Math.max(0, Math.min(rails.length - 1, railIndex));
   ensureRailLoaded(rails[railIndex]); // focused rail may have been recycled
+  ensureRailLoaded(rails[railIndex + 1]); // and the one DOWN lands on next
   var cards = railCards(rails[railIndex]);
   if (!cards.length) return; // cards arrive async → fillRail repaints
   cardIndex = Math.max(0, Math.min(cards.length - 1, cardIndex));
@@ -251,7 +252,7 @@ function paintSearchFocus() {
   });
 }
 window.addEventListener('keydown', function (e) {
-  var kc = e.keyCode || e.which;
+  var kc = Dom.keyCode(e); // also maps remotes that send only a named key
 
   /* When typing in the search box */
   if (document.activeElement === elSearchIn) {

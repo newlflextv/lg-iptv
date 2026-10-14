@@ -106,9 +106,20 @@ async function xtreamGetEPG(cfg, streamId) {
     }
 }
 
+/* Xtream base64-encodes guide text, and the bytes inside are UTF-8. atob()
+   alone returns those bytes one character each, which is right for plain
+   English and wrong for everything else: "Café" came out as "CafÃ©", and
+   Arabic, Greek or Cyrillic titles came out as unreadable runs of accented
+   Latin. The escape/decodeURIComponent pair is the ES5 way to reassemble UTF-8;
+   if the bytes aren't valid UTF-8 the raw decode is kept. */
 function xtreamDecodeEPG(str) {
     if (!str) return '';
-    try { return atob(str); } catch (e) { return str; }
+    var s = String(str);
+    var b64 = s.replace(/\s+/g, '');
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64) || b64.length % 4 === 1) return s;
+    var bin;
+    try { bin = atob(b64); } catch (e) { return s; }
+    try { return decodeURIComponent(escape(bin)); } catch (e) { return bin; }
 }
 
 /* Full programme guide for one channel, including past programmes. Unlike

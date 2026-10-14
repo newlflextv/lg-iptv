@@ -61,13 +61,15 @@ function scheduleEpgSave() {
   _epgSaveTimer = setTimeout(function () {
     // `null` marks "request in flight" and must not be persisted — on the
     // next launch it would read as "already fetched, nothing found" and
-    // that channel would show no guide until the cache expired.
+    // that channel would show no guide until the cache expired. XMLTV
+    // listings are skipped too: they have their own cache, and storing
+    // them twice is how a large guide pushed the channel list out.
     var toSave = {};
     for (var _i = 0, _Object$entries = Object.entries(epgCache); _i < _Object$entries.length; _i++) {
       var _Object$entries$_i = _slicedToArray(_Object$entries[_i], 2),
         k = _Object$entries$_i[0],
         v = _Object$entries$_i[1];
-      if (Array.isArray(v)) toSave[k] = v;
+      if (Array.isArray(v) && !(v.length && v[0] && v[0]._plain)) toSave[k] = v;
     }
     Store.cacheSet(epgCacheKey(), toSave);
   }, 2000);
@@ -81,10 +83,40 @@ function scheduleEpgSave() {
    the session, and buildEpgStrip draws it as a permanent "Loading…". Switching
    category mid-load is the ordinary way that happened. */
 function releaseInFlightEpg(list) {
+  var n = 0;
   for (var i = 0; i < list.length; i++) {
     var id = list[i].stream_id;
-    if (epgCache[id] === null) delete epgCache[id];
+    if (epgCache[id] === null) {
+      delete epgCache[id];
+      n++;
+    }
   }
+  return n;
+}
+
+/* Only the rows around the viewport are fetched. This used to request the
+   guide for EVERY channel in the list — on "All" with a 20 000-channel
+   provider that was 20 000 get_short_epg calls, four at a time, for as long as
+   the page stayed open: thousands of requests for rows nobody scrolled to,
+   enough to get an account rate-limited by its panel, and a guide cache that
+   filled the storage quota. Scrolling asks again (see channels.js), so every
+   row still gets its guide by the time it is on screen. */
+var EPG_ROWS_BEHIND = 8;
+var EPG_ROWS_AHEAD = 24;
+function _epgWindowChannels() {
+  var list = typeof _vsChannels !== "undefined" && _vsChannels.length ? _vsChannels : getFilteredChannels();
+  if (!list.length) return [];
+  var rowH = typeof VS_ROW_H !== "undefined" && VS_ROW_H > 0 ? VS_ROW_H : 96;
+  var top = typeof _vsScrollTop !== "undefined" ? _vsScrollTop : 0;
+  var h = typeof _vsHeight !== "undefined" && _vsHeight > 0 ? _vsHeight : window.innerHeight;
+  var first = Math.max(0, Math.floor(top / rowH) - EPG_ROWS_BEHIND);
+  var last = Math.min(list.length - 1, Math.ceil((top + h) / rowH) + EPG_ROWS_AHEAD);
+  return list.slice(first, last + 1);
+}
+var _epgLoadTimer = null;
+function scheduleEpgWindowLoad(delay) {
+  clearTimeout(_epgLoadTimer);
+  _epgLoadTimer = setTimeout(loadEPGForCurrentCategory, delay === undefined ? 250 : delay);
 }
 function loadEPGForCurrentCategory() {
   return _loadEPGForCurrentCategory.apply(this, arguments);
@@ -102,7 +134,7 @@ function _loadEPGForCurrentCategory() {
           return _context2.a(2);
         case 1:
           myKey = ++epgLoadAbortKey;
-          needed = getFilteredChannels().filter(function (ch) {
+          needed = _epgWindowChannels().filter(function (ch) {
             return epgCache[ch.stream_id] === undefined;
           });
           if (needed.length) {
@@ -202,8 +234,13 @@ function _loadEPGForCurrentCategory() {
         case 10:
           _context2.p = 10;
           /* Covers every exit: the two aborts above, an epgBlocked bail inside a
-             batch, a throw, and the normal finish (where nothing is left null). */
-          releaseInFlightEpg(needed);
+             batch, a throw, and the normal finish (where nothing is left null).
+             A superseding call computed its own list while these were still
+             marked in flight and so skipped them — ask again once they are
+             released, or rows on screen would sit on "Loading…". */
+          if (releaseInFlightEpg(needed) && !epgBlocked && epgLoadAbortKey !== myKey) {
+            scheduleEpgWindowLoad();
+          }
           return _context2.f(10);
         case 11:
           return _context2.a(2);
@@ -302,11 +339,15 @@ function buildEpgStrip(strip, sid) {
     return;
   }
 
-  // Skip re-render if already built for this timeline window
-  if (strip.dataset.state === "filled" && strip.dataset.tlStart === String(tlStart)) return;
+  // Skip re-render if already built from THIS data for this timeline window.
+  // The data matters as much as the window: when an XMLTV guide arrives it
+  // replaces the panel's listings for the same channel, and a strip that
+  // only compared the window kept drawing the old programmes.
+  if (strip.dataset.state === "filled" && strip.dataset.tlStart === String(tlStart) && strip._listings === listings) return;
   strip.dataset.state = "filled";
   strip.dataset.tlStart = String(tlStart);
   strip.innerHTML = "";
+  strip._listings = listings;
   var now = Date.now();
   var frag = document.createDocumentFragment();
   listings.forEach(function (e) {
@@ -328,7 +369,7 @@ function buildEpgStrip(strip, sid) {
     timeSpan.textContent = "".concat(fmtTime(eStart), "\u2013").concat(fmtTime(eEnd));
     var titleSpan = document.createElement("span");
     titleSpan.className = "tl-block-title";
-    titleSpan.textContent = xtreamDecodeEPG(e.title);
+    titleSpan.textContent = epgTitle(e);
     block.appendChild(timeSpan);
     block.appendChild(titleSpan);
     if (isNow) {
@@ -422,77 +463,102 @@ function calcProgress(e) {
   }
 }
 
-// ── XMLTV / custom EPG ────────────────────────────────────────────────────────
+/* Xtream sends titles and descriptions base64-encoded; XMLTV sends plain text
+   and its entries are marked `_plain`. Decoding a plain title as base64 is not
+   harmless — "News" and "Golf" are valid base64 and came out as binary junk. */
+function epgTitle(e) {
+  return !e ? "" : e._plain ? e.title || "" : xtreamDecodeEPG(e.title);
+}
+function epgDesc(e) {
+  return !e ? "" : e._plain ? e.description || "" : xtreamDecodeEPG(e.description);
+}
 
+// ── XMLTV / custom EPG ────────────────────────────────────────────────────────
+//
+// A user-supplied guide, from (in order) the active profile's EPG URL, the
+// app-wide one in Settings → EPG, or the url-tvg an M3U playlist names in its
+// own header. Both settings used to be saved and then never read: nothing
+// called the loader, so a configured guide simply never appeared.
+//
+// Parsed with regular expressions rather than DOMParser. A full XMLTV file is
+// tens of MB; building a DOM of it on a TV is the slowest and most
+// memory-hungry way to read it, where a forward scan over the text holds
+// nothing but the programmes being kept.
+
+var XMLTV_CACHE_KEY = "iptv_xmltv_cache";
+var XMLTV_TTL_MS = 12 * 60 * 60 * 1000;
+var XMLTV_TIMEOUT = 60000;
+/* Only what the timeline can show. Guides run days ahead, and keeping all of
+   it neither fits the storage quota nor is worth the TV's memory. */
+var XMLTV_KEEP_BEHIND_MS = 3 * 60 * 60 * 1000;
+var XMLTV_KEEP_AHEAD_MS = 30 * 60 * 60 * 1000;
+var XMLTV_DESC_MAX = 400;
 var xmltvCache = {};
+var _xmltvLoading = "";
+function xmltvSource(playlistEpgUrl) {
+  var active = null;
+  try {
+    active = Config.resolve();
+  } catch (_) {}
+  var own = active && active.epg_url ? String(active.epg_url).trim() : "";
+  var app = String(Store.get("iptv_custom_epg_url", "") || "").trim();
+  return {
+    url: own || app || String(playlistEpgUrl || "").trim(),
+    match: (own ? active.epg_match : Store.get("iptv_custom_epg_match", "")) || "tvg-id"
+  };
+}
+
+/* The entry point, called once the channel list is known. */
+function loadXMLTV(playlistEpgUrl) {
+  var src = xmltvSource(playlistEpgUrl);
+  if (!src.url) return;
+  if (loadXMLTVFromCache(src.url)) {
+    xmltvCache.matchField = src.match;
+    mergeXMLTVIntoEpgCache();
+    refreshTimeline();
+    return;
+  }
+  loadCustomXMLTV(src.url, src.match);
+}
 function loadCustomXMLTV(_x, _x2) {
   return _loadCustomXMLTV.apply(this, arguments);
 }
 function _loadCustomXMLTV() {
   _loadCustomXMLTV = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee3(url, matchField) {
-    var res, text, parser, doc, channelMap, parsed, count, _t3;
+    var text, now, parsed, count, _t3;
     return _regenerator().w(function (_context3) {
       while (1) switch (_context3.p = _context3.n) {
         case 0:
-          _context3.p = 0;
-          _context3.n = 1;
-          return fetch(url);
-        case 1:
-          res = _context3.v;
-          if (res.ok) {
-            _context3.n = 2;
+          if (!(!url || _xmltvLoading === url)) {
+            _context3.n = 1;
             break;
           }
-          throw new Error("HTTP " + res.status);
-        case 2:
+          return _context3.a(2);
+        case 1:
+          _xmltvLoading = url;
+          _context3.p = 2;
           _context3.n = 3;
-          return res.text();
+          return Net.text(url, {
+            timeout: XMLTV_TIMEOUT
+          });
         case 3:
           text = _context3.v;
-          parser = new DOMParser();
-          doc = parser.parseFromString(text, "application/xml");
-          if (!doc.querySelector("parseerror")) {
+          if (!(text.indexOf("<programme") === -1)) {
             _context3.n = 4;
             break;
           }
-          throw new Error("Invalid XMLTV XML");
+          throw new Error(/\.gz(\?|$)/i.test(url) ? "Compressed (.gz) guides can't be read on the TV — use the plain .xml address." : "That address didn't return an XMLTV guide.");
         case 4:
-          channelMap = {};
-          doc.querySelectorAll("channel").forEach(function (ch) {
-            var _ch$querySelector;
-            var id = ch.getAttribute("id") || "";
-            var name = ((_ch$querySelector = ch.querySelector("display-name")) === null || _ch$querySelector === void 0 || (_ch$querySelector = _ch$querySelector.textContent) === null || _ch$querySelector === void 0 ? void 0 : _ch$querySelector.trim()) || id;
-            channelMap[id] = name;
-          });
-          parsed = {};
-          doc.querySelectorAll("programme").forEach(function (prog) {
-            var _prog$querySelector, _prog$querySelector2;
-            var chId = prog.getAttribute("channel") || "";
-            var start = parseXMLTVDate(prog.getAttribute("start"));
-            var stop = parseXMLTVDate(prog.getAttribute("stop"));
-            var title = ((_prog$querySelector = prog.querySelector("title")) === null || _prog$querySelector === void 0 || (_prog$querySelector = _prog$querySelector.textContent) === null || _prog$querySelector === void 0 ? void 0 : _prog$querySelector.trim()) || "";
-            var desc = ((_prog$querySelector2 = prog.querySelector("desc")) === null || _prog$querySelector2 === void 0 || (_prog$querySelector2 = _prog$querySelector2.textContent) === null || _prog$querySelector2 === void 0 ? void 0 : _prog$querySelector2.trim()) || "";
-            if (!start || !stop) return;
-            if (!parsed[chId]) parsed[chId] = [];
-            parsed[chId].push({
-              title: title,
-              desc: desc,
-              start: toEpgTimeStr(start),
-              end: toEpgTimeStr(stop)
-            });
-          });
+          now = Date.now();
+          parsed = parseXMLTV(text, now - XMLTV_KEEP_BEHIND_MS, now + XMLTV_KEEP_AHEAD_MS);
           xmltvCache = {
-            programmes: parsed,
-            channelMap: channelMap,
+            url: url,
+            programmes: parsed.programmes,
+            channelMap: parsed.channelMap,
             matchField: matchField
           };
-          try {
-            localStorage.setItem("iptv_xmltv_cache", JSON.stringify({
-              ts: Date.now(),
-              data: xmltvCache
-            }));
-          } catch (_unused3) {}
-          count = Object.keys(parsed).length;
+          Store.cacheSet(XMLTV_CACHE_KEY, xmltvCache);
+          count = Object.keys(parsed.programmes).length;
           setSettingsStatus("epg-load-status", "\u2713 Loaded ".concat(count, " channels from XMLTV."), "ok");
           mergeXMLTVIntoEpgCache();
           refreshTimeline();
@@ -503,67 +569,135 @@ function _loadCustomXMLTV() {
           _t3 = _context3.v;
           setSettingsStatus("epg-load-status", "Error: " + _t3.message, "err");
         case 6:
+          _context3.p = 6;
+          _xmltvLoading = "";
+          return _context3.f(6);
+        case 7:
           return _context3.a(2);
       }
-    }, _callee3, null, [[0, 5]]);
+    }, _callee3, null, [[2, 5, 6, 7]]);
   }));
   return _loadCustomXMLTV.apply(this, arguments);
 }
+var _XML_ENTITIES = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: "\"",
+  apos: "'",
+  nbsp: "\xA0"
+};
+function _charFromCode(code) {
+  if (!(code > 0 && code < 0x110000)) return "";
+  if (code <= 0xFFFF) return String.fromCharCode(code);
+  code -= 0x10000; // String.fromCodePoint is Chromium 41+
+  return String.fromCharCode(0xD800 + (code >> 10), 0xDC00 + (code & 0x3FF));
+}
+function _xmlText(s) {
+  return String(s || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/<[^>]*>/g, "").replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, function (m, ent) {
+    if (ent.charAt(0) === "#") {
+      var x = ent.charAt(1) === "x" || ent.charAt(1) === "X";
+      return _charFromCode(parseInt(ent.slice(x ? 2 : 1), x ? 16 : 10)) || m;
+    }
+    var named = _XML_ENTITIES[ent.toLowerCase()];
+    return named !== undefined ? named : m;
+  });
+}
+var _xmlAttrRe = {};
+function _xmlAttr(attrs, name) {
+  var re = _xmlAttrRe[name] || (_xmlAttrRe[name] = new RegExp("\\b" + name + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')"));
+  var m = re.exec(attrs);
+  return m ? _xmlText(m[1] !== undefined ? m[1] : m[2]) : "";
+}
+function parseXMLTV(text, keepFrom, keepTo) {
+  var channelMap = {};
+  var chRe = /<channel\b([^>]*)>([\s\S]*?)<\/channel>/g;
+  var m;
+  while (m = chRe.exec(text)) {
+    var id = _xmlAttr(m[1], "id");
+    var dn = /<display-name\b[^>]*>([\s\S]*?)<\/display-name>/.exec(m[2]);
+    channelMap[id] = (dn ? _xmlText(dn[1]).trim() : "") || id;
+  }
+  var programmes = {};
+  var prRe = /<programme\b([^>]*)>([\s\S]*?)<\/programme>/g;
+  while (m = prRe.exec(text)) {
+    var attrs = m[1];
+    var stop = parseXMLTVDate(_xmlAttr(attrs, "stop"));
+    if (!stop || stop < keepFrom) continue;
+    var start = parseXMLTVDate(_xmlAttr(attrs, "start"));
+    if (!start || start > keepTo) continue;
+    var chId = _xmlAttr(attrs, "channel");
+    var t = /<title\b[^>]*>([\s\S]*?)<\/title>/.exec(m[2]);
+    var d = /<desc\b[^>]*>([\s\S]*?)<\/desc>/.exec(m[2]);
+    var desc = d ? _xmlText(d[1]).trim() : "";
+    if (desc.length > XMLTV_DESC_MAX) desc = desc.slice(0, XMLTV_DESC_MAX - 1) + "…";
+    (programmes[chId] || (programmes[chId] = [])).push({
+      title: t ? _xmlText(t[1]).trim() : "",
+      description: desc,
+      start_timestamp: Math.floor(start / 1000),
+      stop_timestamp: Math.floor(stop / 1000),
+      _plain: 1
+    });
+  }
+  // Guides are not always in time order per channel; now/next assumes they are.
+  Object.keys(programmes).forEach(function (k) {
+    programmes[k].sort(function (a, b) {
+      return a.start_timestamp - b.start_timestamp;
+    });
+  });
+  return {
+    channelMap: channelMap,
+    programmes: programmes
+  };
+}
+
+/* "20240101203000 +0100". Computed with Date.UTC rather than by building an
+   ISO string for Date to parse — older engines disagree about how to read an
+   ISO string with an offset, and this needs no parsing at all. */
 function parseXMLTVDate(str) {
-  if (!str) return null;
-  var m = str.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*([+-]\d{4})?/);
-  if (!m) return null;
-  var _m = _slicedToArray(m, 8),
-    yr = _m[1],
-    mo = _m[2],
-    dy = _m[3],
-    hh = _m[4],
-    mm = _m[5],
-    ss = _m[6],
-    tz = _m[7];
-  var tzStr = tz ? tz.slice(0, 3) + ":" + tz.slice(3) : "+00:00";
-  return new Date("".concat(yr, "-").concat(mo, "-").concat(dy, "T").concat(hh, ":").concat(mm, ":").concat(ss).concat(tzStr)).getTime();
+  if (!str) return 0;
+  var m = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?\s*([+-])?(\d{2})?(\d{2})?/.exec(String(str).trim());
+  if (!m) return 0;
+  var t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+  if (m[7] && m[8]) {
+    var off = (+m[8] * 60 + +(m[9] || 0)) * 60000;
+    t -= m[7] === "-" ? -off : off;
+  }
+  return t;
 }
-function toEpgTimeStr(ms) {
-  return new Date(ms).toISOString().replace("T", " ").replace(/\.\d+Z$/, "");
-}
-function loadXMLTVFromCache() {
-  try {
-    var raw = localStorage.getItem("iptv_xmltv_cache");
-    if (!raw) return;
-    var _JSON$parse = JSON.parse(raw),
-      ts = _JSON$parse.ts,
-      data = _JSON$parse.data;
-    if (Date.now() - ts > 24 * 60 * 60 * 1000) return;
-    xmltvCache = data;
-  } catch (_unused2) {}
+function loadXMLTVFromCache(url) {
+  var data = Store.cacheGet(XMLTV_CACHE_KEY, XMLTV_TTL_MS);
+  if (!data || !data.programmes || url && data.url !== url) return false;
+  xmltvCache = data;
+  return true;
 }
 function mergeXMLTVIntoEpgCache() {
   if (!xmltvCache.programmes) return;
   var matchField = xmltvCache.matchField || "tvg-id";
+  var progs = xmltvCache.programmes;
 
-  // Build reverse name→xmlId map once instead of iterating per channel
-  var nameToXmlId = {};
+  /* Lower-cased lookups built once, instead of a scan per channel. Ids are
+     matched case-insensitively — "BBCOne.uk" in the guide and "bbcone.uk"
+     on the channel are the same channel. */
+  var byId = {};
+  Object.keys(progs).forEach(function (id) {
+    byId[id.toLowerCase()] = progs[id];
+  });
+  var byName = {};
   for (var _i2 = 0, _Object$entries2 = Object.entries(xmltvCache.channelMap || {}); _i2 < _Object$entries2.length; _i2++) {
     var _Object$entries2$_i = _slicedToArray(_Object$entries2[_i2], 2),
       xmlId = _Object$entries2$_i[0],
       name = _Object$entries2$_i[1];
-    nameToXmlId[name.toLowerCase()] = xmlId;
+    if (progs[xmlId]) byName[String(name).toLowerCase()] = progs[xmlId];
   }
   allChannels.forEach(function (ch) {
-    var sid = String(ch.stream_id);
+    var name = String(ch.name || "").toLowerCase();
     var listings = null;
     if (matchField === "tvg-id") {
-      var epgId = ch.epg_channel_id || "";
-      listings = xmltvCache.programmes[epgId] || null;
-      if (!listings) {
-        var _xmlId = nameToXmlId[(ch.name || "").toLowerCase()];
-        if (_xmlId) listings = xmltvCache.programmes[_xmlId] || null;
-      }
+      listings = byId[String(ch.epg_channel_id || "").toLowerCase()] || byName[name] || null;
     } else {
-      var _xmlId2 = nameToXmlId[(ch.name || "").toLowerCase()];
-      if (_xmlId2) listings = xmltvCache.programmes[_xmlId2] || null;
+      listings = byName[name] || null;
     }
-    if (listings) epgCache[sid] = listings;
+    if (listings) epgCache[String(ch.stream_id)] = listings;
   });
 }

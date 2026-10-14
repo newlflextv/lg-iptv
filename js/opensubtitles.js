@@ -62,7 +62,13 @@ window.OpenSubtitles = (function () {
     function request(path, opts) {
         opts = opts || {};
         if (!configured()) return Promise.reject(new Error('No OpenSubtitles API key set. Add one in Settings → Subtitles.'));
-        return fetch(API + path, opts).then(function (r) {
+        /* Net.timed rather than bare fetch: without a timeout that actually
+           fires (webOS 4/5 have no real AbortController) a slow API left the
+           subtitle menu on "Searching…" indefinitely. */
+        var timed = (typeof Net !== 'undefined' && Net.timed)
+            ? Net.timed(API + path, opts, 15000)
+            : fetch(API + path, opts);
+        return timed.then(function (r) {
             return r.text().then(function (text) {
                 var body = null;
                 try { body = text ? JSON.parse(text) : null; } catch (e) {}

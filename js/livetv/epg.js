@@ -49,10 +49,12 @@ function scheduleEpgSave() {
     _epgSaveTimer = setTimeout(() => {
         // `null` marks "request in flight" and must not be persisted — on the
         // next launch it would read as "already fetched, nothing found" and
-        // that channel would show no guide until the cache expired.
+        // that channel would show no guide until the cache expired. XMLTV
+        // listings are skipped too: they have their own cache, and storing
+        // them twice is how a large guide pushed the channel list out.
         const toSave = {};
         for (const [k, v] of Object.entries(epgCache)) {
-            if (Array.isArray(v)) toSave[k] = v;
+            if (Array.isArray(v) && !(v.length && v[0] && v[0]._plain)) toSave[k] = v;
         }
         Store.cacheSet(epgCacheKey(), toSave);
     }, 2000);
@@ -67,16 +69,45 @@ function scheduleEpgSave() {
    the session, and buildEpgStrip draws it as a permanent "Loading…". Switching
    category mid-load is the ordinary way that happened. */
 function releaseInFlightEpg(list) {
+    let n = 0;
     for (let i = 0; i < list.length; i++) {
         const id = list[i].stream_id;
-        if (epgCache[id] === null) delete epgCache[id];
+        if (epgCache[id] === null) { delete epgCache[id]; n++; }
     }
+    return n;
+}
+
+/* Only the rows around the viewport are fetched. This used to request the
+   guide for EVERY channel in the list — on "All" with a 20 000-channel
+   provider that was 20 000 get_short_epg calls, four at a time, for as long as
+   the page stayed open: thousands of requests for rows nobody scrolled to,
+   enough to get an account rate-limited by its panel, and a guide cache that
+   filled the storage quota. Scrolling asks again (see channels.js), so every
+   row still gets its guide by the time it is on screen. */
+const EPG_ROWS_BEHIND = 8;
+const EPG_ROWS_AHEAD  = 24;
+
+function _epgWindowChannels() {
+    const list = (typeof _vsChannels !== "undefined" && _vsChannels.length) ? _vsChannels : getFilteredChannels();
+    if (!list.length) return [];
+    const rowH  = (typeof VS_ROW_H !== "undefined" && VS_ROW_H > 0) ? VS_ROW_H : 96;
+    const top   = typeof _vsScrollTop !== "undefined" ? _vsScrollTop : 0;
+    const h     = (typeof _vsHeight !== "undefined" && _vsHeight > 0) ? _vsHeight : window.innerHeight;
+    const first = Math.max(0, Math.floor(top / rowH) - EPG_ROWS_BEHIND);
+    const last  = Math.min(list.length - 1, Math.ceil((top + h) / rowH) + EPG_ROWS_AHEAD);
+    return list.slice(first, last + 1);
+}
+
+let _epgLoadTimer = null;
+function scheduleEpgWindowLoad(delay) {
+    clearTimeout(_epgLoadTimer);
+    _epgLoadTimer = setTimeout(loadEPGForCurrentCategory, delay === undefined ? 250 : delay);
 }
 
 async function loadEPGForCurrentCategory() {
     if (epgBlocked) return;
     const myKey  = ++epgLoadAbortKey;
-    const needed = getFilteredChannels().filter(ch => epgCache[ch.stream_id] === undefined);
+    const needed = _epgWindowChannels().filter(ch => epgCache[ch.stream_id] === undefined);
     if (!needed.length) return;
     needed.forEach(ch => { epgCache[ch.stream_id] = null; });
 
@@ -109,8 +140,13 @@ async function loadEPGForCurrentCategory() {
         scheduleEpgSave();
     } finally {
         /* Covers every exit: the two aborts above, an epgBlocked bail inside a
-           batch, a throw, and the normal finish (where nothing is left null). */
-        releaseInFlightEpg(needed);
+           batch, a throw, and the normal finish (where nothing is left null).
+           A superseding call computed its own list while these were still
+           marked in flight and so skipped them — ask again once they are
+           released, or rows on screen would sit on "Loading…". */
+        if (releaseInFlightEpg(needed) && !epgBlocked && epgLoadAbortKey !== myKey) {
+            scheduleEpgWindowLoad();
+        }
     }
 }
 
@@ -181,10 +217,15 @@ function buildEpgStrip(strip, sid) {
         strip.appendChild(ph); return;
     }
 
-    // Skip re-render if already built for this timeline window
-    if (strip.dataset.state === "filled" && strip.dataset.tlStart === String(tlStart)) return;
+    // Skip re-render if already built from THIS data for this timeline window.
+    // The data matters as much as the window: when an XMLTV guide arrives it
+    // replaces the panel's listings for the same channel, and a strip that
+    // only compared the window kept drawing the old programmes.
+    if (strip.dataset.state === "filled" && strip.dataset.tlStart === String(tlStart) &&
+        strip._listings === listings) return;
 
     strip.dataset.state = "filled"; strip.dataset.tlStart = String(tlStart); strip.innerHTML = "";
+    strip._listings = listings;
     const now  = Date.now();
     const frag = document.createDocumentFragment();
 
@@ -203,7 +244,7 @@ function buildEpgStrip(strip, sid) {
         block.style.width = `calc(${width}% - 2px)`;
 
         const timeSpan  = document.createElement("span"); timeSpan.className = "tl-block-time";  timeSpan.textContent = `${fmtTime(eStart)}–${fmtTime(eEnd)}`;
-        const titleSpan = document.createElement("span"); titleSpan.className = "tl-block-title"; titleSpan.textContent = xtreamDecodeEPG(e.title);
+        const titleSpan = document.createElement("span"); titleSpan.className = "tl-block-title"; titleSpan.textContent = epgTitle(e);
         block.appendChild(timeSpan); block.appendChild(titleSpan);
 
         if (isNow) {
@@ -276,97 +317,200 @@ function calcProgress(e) {
     } catch { return 0; }
 }
 
+/* Xtream sends titles and descriptions base64-encoded; XMLTV sends plain text
+   and its entries are marked `_plain`. Decoding a plain title as base64 is not
+   harmless — "News" and "Golf" are valid base64 and came out as binary junk. */
+function epgTitle(e) { return !e ? "" : e._plain ? (e.title || "") : xtreamDecodeEPG(e.title); }
+function epgDesc(e)  { return !e ? "" : e._plain ? (e.description || "") : xtreamDecodeEPG(e.description); }
+
 
 // ── XMLTV / custom EPG ────────────────────────────────────────────────────────
+//
+// A user-supplied guide, from (in order) the active profile's EPG URL, the
+// app-wide one in Settings → EPG, or the url-tvg an M3U playlist names in its
+// own header. Both settings used to be saved and then never read: nothing
+// called the loader, so a configured guide simply never appeared.
+//
+// Parsed with regular expressions rather than DOMParser. A full XMLTV file is
+// tens of MB; building a DOM of it on a TV is the slowest and most
+// memory-hungry way to read it, where a forward scan over the text holds
+// nothing but the programmes being kept.
+
+const XMLTV_CACHE_KEY = "iptv_xmltv_cache";
+const XMLTV_TTL_MS    = 12 * 60 * 60 * 1000;
+const XMLTV_TIMEOUT   = 60000;
+/* Only what the timeline can show. Guides run days ahead, and keeping all of
+   it neither fits the storage quota nor is worth the TV's memory. */
+const XMLTV_KEEP_BEHIND_MS = 3 * 60 * 60 * 1000;
+const XMLTV_KEEP_AHEAD_MS  = 30 * 60 * 60 * 1000;
+const XMLTV_DESC_MAX       = 400;
 
 let xmltvCache = {};
+let _xmltvLoading = "";
+
+function xmltvSource(playlistEpgUrl) {
+    let active = null;
+    try { active = Config.resolve(); } catch (_) {}
+    const own = active && active.epg_url ? String(active.epg_url).trim() : "";
+    const app = String(Store.get("iptv_custom_epg_url", "") || "").trim();
+    return {
+        url:   own || app || String(playlistEpgUrl || "").trim(),
+        match: (own ? active.epg_match : Store.get("iptv_custom_epg_match", "")) || "tvg-id"
+    };
+}
+
+/* The entry point, called once the channel list is known. */
+function loadXMLTV(playlistEpgUrl) {
+    const src = xmltvSource(playlistEpgUrl);
+    if (!src.url) return;
+    if (loadXMLTVFromCache(src.url)) {
+        xmltvCache.matchField = src.match;
+        mergeXMLTVIntoEpgCache();
+        refreshTimeline();
+        return;
+    }
+    loadCustomXMLTV(src.url, src.match);
+}
 
 async function loadCustomXMLTV(url, matchField) {
+    if (!url || _xmltvLoading === url) return;
+    _xmltvLoading = url;
     try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const text   = await res.text();
-        const parser = new DOMParser();
-        const doc    = parser.parseFromString(text, "application/xml");
-        if (doc.querySelector("parseerror")) throw new Error("Invalid XMLTV XML");
+        const text = await Net.text(url, { timeout: XMLTV_TIMEOUT });
+        if (text.indexOf("<programme") === -1) {
+            throw new Error(/\.gz(\?|$)/i.test(url)
+                ? "Compressed (.gz) guides can't be read on the TV — use the plain .xml address."
+                : "That address didn't return an XMLTV guide.");
+        }
+        const now    = Date.now();
+        const parsed = parseXMLTV(text, now - XMLTV_KEEP_BEHIND_MS, now + XMLTV_KEEP_AHEAD_MS);
+        xmltvCache = { url, programmes: parsed.programmes, channelMap: parsed.channelMap, matchField };
+        Store.cacheSet(XMLTV_CACHE_KEY, xmltvCache);
 
-        const channelMap = {};
-        doc.querySelectorAll("channel").forEach(ch => {
-            const id   = ch.getAttribute("id") || "";
-            const name = ch.querySelector("display-name")?.textContent?.trim() || id;
-            channelMap[id] = name;
-        });
-
-        const parsed = {};
-        doc.querySelectorAll("programme").forEach(prog => {
-            const chId  = prog.getAttribute("channel") || "";
-            const start = parseXMLTVDate(prog.getAttribute("start"));
-            const stop  = parseXMLTVDate(prog.getAttribute("stop"));
-            const title = prog.querySelector("title")?.textContent?.trim() || "";
-            const desc  = prog.querySelector("desc")?.textContent?.trim()  || "";
-            if (!start || !stop) return;
-            if (!parsed[chId]) parsed[chId] = [];
-            parsed[chId].push({ title, desc, start: toEpgTimeStr(start), end: toEpgTimeStr(stop) });
-        });
-
-        xmltvCache = { programmes: parsed, channelMap, matchField };
-        try { localStorage.setItem("iptv_xmltv_cache", JSON.stringify({ ts: Date.now(), data: xmltvCache })); } catch {}
-
-        const count = Object.keys(parsed).length;
+        const count = Object.keys(parsed.programmes).length;
         setSettingsStatus("epg-load-status", `✓ Loaded ${count} channels from XMLTV.`, "ok");
         mergeXMLTVIntoEpgCache();
         refreshTimeline();
     } catch (err) {
         setSettingsStatus("epg-load-status", "Error: " + err.message, "err");
+    } finally {
+        _xmltvLoading = "";
     }
 }
 
-function parseXMLTVDate(str) {
-    if (!str) return null;
-    const m = str.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*([+-]\d{4})?/);
-    if (!m) return null;
-    const [, yr, mo, dy, hh, mm, ss, tz] = m;
-    const tzStr = tz ? tz.slice(0, 3) + ":" + tz.slice(3) : "+00:00";
-    return new Date(`${yr}-${mo}-${dy}T${hh}:${mm}:${ss}${tzStr}`).getTime();
-}
-function toEpgTimeStr(ms) {
-    return new Date(ms).toISOString().replace("T", " ").replace(/\.\d+Z$/, "");
+const _XML_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: "\u00a0" };
+
+function _charFromCode(code) {
+    if (!(code > 0 && code < 0x110000)) return "";
+    if (code <= 0xFFFF) return String.fromCharCode(code);
+    code -= 0x10000;                     // String.fromCodePoint is Chromium 41+
+    return String.fromCharCode(0xD800 + (code >> 10), 0xDC00 + (code & 0x3FF));
 }
 
-function loadXMLTVFromCache() {
-    try {
-        const raw = localStorage.getItem("iptv_xmltv_cache");
-        if (!raw) return;
-        const { ts, data } = JSON.parse(raw);
-        if (Date.now() - ts > 24 * 60 * 60 * 1000) return;
-        xmltvCache = data;
-    } catch {}
+function _xmlText(s) {
+    return String(s || "")
+        .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+        .replace(/<[^>]*>/g, "")
+        .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, ent) => {
+            if (ent.charAt(0) === "#") {
+                const x = ent.charAt(1) === "x" || ent.charAt(1) === "X";
+                return _charFromCode(parseInt(ent.slice(x ? 2 : 1), x ? 16 : 10)) || m;
+            }
+            const named = _XML_ENTITIES[ent.toLowerCase()];
+            return named !== undefined ? named : m;
+        });
+}
+
+const _xmlAttrRe = {};
+function _xmlAttr(attrs, name) {
+    const re = _xmlAttrRe[name] || (_xmlAttrRe[name] = new RegExp("\\b" + name + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')"));
+    const m = re.exec(attrs);
+    return m ? _xmlText(m[1] !== undefined ? m[1] : m[2]) : "";
+}
+
+function parseXMLTV(text, keepFrom, keepTo) {
+    const channelMap = {};
+    const chRe = /<channel\b([^>]*)>([\s\S]*?)<\/channel>/g;
+    let m;
+    while ((m = chRe.exec(text))) {
+        const id = _xmlAttr(m[1], "id");
+        const dn = /<display-name\b[^>]*>([\s\S]*?)<\/display-name>/.exec(m[2]);
+        channelMap[id] = (dn ? _xmlText(dn[1]).trim() : "") || id;
+    }
+
+    const programmes = {};
+    const prRe = /<programme\b([^>]*)>([\s\S]*?)<\/programme>/g;
+    while ((m = prRe.exec(text))) {
+        const attrs = m[1];
+        const stop  = parseXMLTVDate(_xmlAttr(attrs, "stop"));
+        if (!stop || stop < keepFrom) continue;
+        const start = parseXMLTVDate(_xmlAttr(attrs, "start"));
+        if (!start || start > keepTo) continue;
+        const chId = _xmlAttr(attrs, "channel");
+        const t = /<title\b[^>]*>([\s\S]*?)<\/title>/.exec(m[2]);
+        const d = /<desc\b[^>]*>([\s\S]*?)<\/desc>/.exec(m[2]);
+        let desc = d ? _xmlText(d[1]).trim() : "";
+        if (desc.length > XMLTV_DESC_MAX) desc = desc.slice(0, XMLTV_DESC_MAX - 1) + "…";
+        (programmes[chId] || (programmes[chId] = [])).push({
+            title: t ? _xmlText(t[1]).trim() : "",
+            description: desc,
+            start_timestamp: Math.floor(start / 1000),
+            stop_timestamp:  Math.floor(stop / 1000),
+            _plain: 1
+        });
+    }
+    // Guides are not always in time order per channel; now/next assumes they are.
+    Object.keys(programmes).forEach(k => {
+        programmes[k].sort((a, b) => a.start_timestamp - b.start_timestamp);
+    });
+    return { channelMap, programmes };
+}
+
+/* "20240101203000 +0100". Computed with Date.UTC rather than by building an
+   ISO string for Date to parse — older engines disagree about how to read an
+   ISO string with an offset, and this needs no parsing at all. */
+function parseXMLTVDate(str) {
+    if (!str) return 0;
+    const m = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?\s*([+-])?(\d{2})?(\d{2})?/.exec(String(str).trim());
+    if (!m) return 0;
+    let t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+    if (m[7] && m[8]) {
+        const off = (+m[8] * 60 + +(m[9] || 0)) * 60000;
+        t -= m[7] === "-" ? -off : off;
+    }
+    return t;
+}
+
+function loadXMLTVFromCache(url) {
+    const data = Store.cacheGet(XMLTV_CACHE_KEY, XMLTV_TTL_MS);
+    if (!data || !data.programmes || (url && data.url !== url)) return false;
+    xmltvCache = data;
+    return true;
 }
 
 function mergeXMLTVIntoEpgCache() {
     if (!xmltvCache.programmes) return;
     const matchField = xmltvCache.matchField || "tvg-id";
+    const progs = xmltvCache.programmes;
 
-    // Build reverse name→xmlId map once instead of iterating per channel
-    const nameToXmlId = {};
+    /* Lower-cased lookups built once, instead of a scan per channel. Ids are
+       matched case-insensitively — "BBCOne.uk" in the guide and "bbcone.uk"
+       on the channel are the same channel. */
+    const byId = {};
+    Object.keys(progs).forEach(id => { byId[id.toLowerCase()] = progs[id]; });
+    const byName = {};
     for (const [xmlId, name] of Object.entries(xmltvCache.channelMap || {})) {
-        nameToXmlId[name.toLowerCase()] = xmlId;
+        if (progs[xmlId]) byName[String(name).toLowerCase()] = progs[xmlId];
     }
 
     allChannels.forEach(ch => {
-        const sid = String(ch.stream_id);
+        const name = String(ch.name || "").toLowerCase();
         let listings = null;
         if (matchField === "tvg-id") {
-            const epgId = ch.epg_channel_id || "";
-            listings = xmltvCache.programmes[epgId] || null;
-            if (!listings) {
-                const xmlId = nameToXmlId[(ch.name || "").toLowerCase()];
-                if (xmlId) listings = xmltvCache.programmes[xmlId] || null;
-            }
+            listings = byId[String(ch.epg_channel_id || "").toLowerCase()] || byName[name] || null;
         } else {
-            const xmlId = nameToXmlId[(ch.name || "").toLowerCase()];
-            if (xmlId) listings = xmltvCache.programmes[xmlId] || null;
+            listings = byName[name] || null;
         }
-        if (listings) epgCache[sid] = listings;
+        if (listings) epgCache[String(ch.stream_id)] = listings;
     });
 }

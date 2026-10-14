@@ -27,7 +27,15 @@
   /* ── Params ──────────────────────────────────────────────────────────── */
   function param(name) {
     var m = window.location.search.match(new RegExp('[?&]' + name + '=([^&]*)'));
-    return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : '';
+    if (!m) return '';
+    /* A stray % in a title (or a launcher that re-encodes the address)
+       makes decodeURIComponent throw — which used to stop this whole
+       script, so the player page sat black with nothing playing. */
+    try {
+      return decodeURIComponent(m[1].replace(/\+/g, ' '));
+    } catch (e) {
+      return m[1];
+    }
   }
   function lsGet(key) {
     try {
@@ -183,8 +191,11 @@
     /* Reload rather than swapping the source in place: every bit of setup
        on this page — resume, subtitles, track preferences, engine memory —
        keys off the metadata read at load. Re-running it is what guarantees
-       episode two behaves exactly like episode one. */
-    window.location.href = 'player.html?t=' + encodeURIComponent(token) + '&url=' + encodeURIComponent(nextUrl) + '&title=' + encodeURIComponent(name);
+       episode two behaves exactly like episode one.
+        replace(), not href: BACK goes to history.back(), and with href each
+       episode stacked another player entry — so after binge-watching four
+       episodes BACK replayed episode three instead of leaving the player. */
+    window.location.replace('player.html?t=' + encodeURIComponent(token) + '&url=' + encodeURIComponent(nextUrl) + '&title=' + encodeURIComponent(name));
   }
   if (typeof Episodes !== 'undefined') {
     Episodes.init({
@@ -285,33 +296,47 @@
   video.addEventListener('loadedmetadata', seekToResume);
   video.addEventListener('canplay', seekToResume);
   var _lastSave = 0;
+  /* Titles started and abandoned used to stay in here for ever — only a
+     FINISHED title was ever removed — so the map grew with everything ever
+     sampled. Continue Watching shows the newest 20; keeping a few times that
+     is plenty, and the oldest go first. */
+  var PROGRESS_MAX = 80;
   function saveProgress(finished) {
     if (!meta || !meta.key) return;
     var dur = video.duration,
       pos = video.currentTime;
     if (!isFinite(dur) || dur <= 0) return;
-    try {
-      var all = JSON.parse(localStorage.getItem('vod_progress') || '{}');
-      if (finished || pos / dur > 0.95) {
-        delete all[meta.key]; // drop finished titles
-      } else if (pos > 30) {
-        all[meta.key] = {
-          key: meta.key,
-          type: meta.type,
-          id: meta.id,
-          ext: meta.ext,
-          name: meta.name,
-          icon: meta.icon,
-          series_id: meta.series_id,
-          season: meta.season,
-          episode: meta.episode,
-          pos: pos,
-          dur: dur,
-          ts: Date.now()
-        };
+    var all = Store.get('vod_progress', {}) || {};
+    if (finished || pos / dur > 0.95) {
+      delete all[meta.key]; // drop finished titles
+    } else if (pos > 30) {
+      all[meta.key] = {
+        key: meta.key,
+        type: meta.type,
+        id: meta.id,
+        ext: meta.ext,
+        name: meta.name,
+        icon: meta.icon,
+        series_id: meta.series_id,
+        season: meta.season,
+        episode: meta.episode,
+        pos: pos,
+        dur: dur,
+        ts: Date.now()
+      };
+      var keys = Object.keys(all);
+      if (keys.length > PROGRESS_MAX) {
+        keys.sort(function (a, b) {
+          return (all[a] && all[a].ts || 0) - (all[b] && all[b].ts || 0);
+        });
+        for (var i = 0; i < keys.length - PROGRESS_MAX; i++) delete all[keys[i]];
       }
-      localStorage.setItem('vod_progress', JSON.stringify(all));
-    } catch (e) {}
+    } else {
+      return;
+    }
+    /* Through Store so a full storage quota makes room by dropping a cache
+       instead of silently losing the resume point. */
+    Store.set('vod_progress', all);
   }
   video.addEventListener('timeupdate', function () {
     var now = Date.now();
@@ -399,8 +424,21 @@
       paintFocus();
     }
   }
+
+  /* play() returns nothing before Chromium 50, so `.play().catch` threw on
+     webOS 3 and the play button did nothing at all. */
   function togglePlay() {
-    if (video.paused) video.play().catch(function () {});else video.pause();
+    if (!video.paused) {
+      video.pause();
+      return;
+    }
+    var p;
+    try {
+      p = video.play();
+    } catch (e) {
+      return;
+    }
+    if (p && typeof p.then === 'function') p.then(null, function () {});
   }
   function seek(delta) {
     if (!isFinite(video.duration)) return;
@@ -1259,7 +1297,8 @@
 
   /* ── D-pad ───────────────────────────────────────────────────────────── */
   window.addEventListener('keydown', function (e) {
-    var kc = e.keyCode || e.which;
+    /* Dom.keyCode also maps remotes that send only a named key. */
+    var kc = typeof Dom !== 'undefined' ? Dom.keyCode(e) : e.keyCode || e.which;
 
     // Track menu captures input while open
     if (subsOpen) {

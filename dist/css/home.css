@@ -1,0 +1,256 @@
+/* Generated from assets/home.css by tools/build-css.js — edit the source, not this file. */
+#home {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    background: #0c0c0e;
+    background: var(--bg);
+}
+#home-header {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: space-between;
+    justify-content: space-between;
+    padding: 2.25rem 3.75rem 1.75rem;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+}
+#home-brand {
+    font-size: 2.125rem;
+    font-weight: 700;
+    color: #e5001e;
+    color: var(--accent);
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    gap: 0.875rem;
+}
+html.no-flex-gap #home-brand > * + * {
+    margin-left: 0.875rem;
+}
+#home-brand span {
+    color: #f0f0f5;
+    color: var(--text);
+}
+#home-brand small {
+    font-size: 1.125rem;
+    font-weight: 400;
+    color: #80808c;
+    color: var(--text-dim);
+}
+#home-date {
+    font-size: 1.25rem;
+    color: #80808c;
+    color: var(--text-dim);
+}
+#home-grid {
+    -webkit-flex: 1;
+    flex: 1;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    gap: 2.5rem;
+    padding: 0 3.75rem 3.75rem;
+}
+html.no-flex-gap #home-grid > * + * {
+    margin-left: 2.5rem;
+}
+.home-tile-main {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    -webkit-align-items: flex-start;
+    align-items: flex-start;
+    -webkit-justify-content: flex-end;
+    justify-content: flex-end;
+    width: 30rem;
+    height: 21.25rem;
+    background: #1b1b20;
+    background: var(--bg3);
+    border: 1px solid #22222a;
+    border: var(--border);
+    border-radius: 1.25rem;
+    padding: 2rem 2.25rem;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    -webkit-transition: -webkit-transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+}
+.home-tile-main:hover,
+.home-tile-main.tv-focus-visible {
+    -webkit-transform: scale(1.03);
+    transform: scale(1.03);
+    border-color: #e5001e;
+    border-color: var(--accent);
+    background: #242428;
+    background: var(--bg4);
+    outline: none;
+}
+.home-tile-main.tv-focus-visible {
+    box-shadow: 0 0 0 4px #e5001e;
+    box-shadow: 0 0 0 4px var(--accent);
+}
+.home-tile-icon {
+    font-size: 4.5rem;
+    line-height: 1;
+    margin-bottom: 1.25rem;
+    position: absolute;
+    top: 1.75rem;
+    left: 2.25rem;
+    opacity: 0.9;
+}
+.home-tile-label {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #f0f0f5;
+    color: var(--text);
+    position: absolute;
+    bottom: 2rem;
+    left: 2.25rem;
+}
+.home-tile-sub {
+    font-size: 1.0625rem;
+    color: #80808c;
+    color: var(--text-dim);
+    position: absolute;
+    bottom: 0.625rem;
+    left: 2.25rem;
+}
+.home-tile-main.tile-livetv {
+    background: linear-gradient(135deg, #1a0508 0%, #1b1b20 60%);
+    background: linear-gradient(135deg, #1a0508 0%, var(--bg3) 60%);
+    border-color: #2a0a10;
+}
+.home-tile-main.tile-livetv:hover,
+.home-tile-main.tile-livetv.tv-focus-visible {
+    background: linear-gradient(135deg, #2a080e 0%, #242428 60%);
+    background: linear-gradient(135deg, #2a080e 0%, var(--bg4) 60%);
+    border-color: #e5001e;
+    border-color: var(--accent);
+}
+.home-tile-main.tile-vod {
+    background: linear-gradient(135deg, #070d1a 0%, #1b1b20 60%);
+    background: linear-gradient(135deg, #070d1a 0%, var(--bg3) 60%);
+    border-color: #0d1525;
+}
+.home-tile-main.tile-vod:hover,
+.home-tile-main.tile-vod.tv-focus-visible {
+    background: linear-gradient(135deg, #0a1220 0%, #242428 60%);
+    background: linear-gradient(135deg, #0a1220 0%, var(--bg4) 60%);
+    border-color: #2255aa;
+}
+.home-tile-col {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+html.no-flex-gap .home-tile-col > * + * {
+    margin-top: 1.5rem;
+}
+.home-tile-small {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    gap: 1.375rem;
+    width: 20rem;
+    height: 9.25rem;
+    background: #1b1b20;
+    background: var(--bg3);
+    border: 1px solid #22222a;
+    border: var(--border);
+    border-radius: 1rem;
+    padding: 0 1.75rem;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    -webkit-transition: -webkit-transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+}
+html.no-flex-gap .home-tile-small > * + * {
+    margin-left: 1.375rem;
+}
+.home-tile-small:hover,
+.home-tile-small.tv-focus-visible {
+    -webkit-transform: scale(1.03);
+    transform: scale(1.03);
+    border-color: #e5001e;
+    border-color: var(--accent);
+    background: #242428;
+    background: var(--bg4);
+    outline: none;
+}
+.home-tile-small.tv-focus-visible {
+    box-shadow: 0 0 0 4px #e5001e;
+    box-shadow: 0 0 0 4px var(--accent);
+}
+.home-tile-small .home-tile-icon {
+    position: static;
+    font-size: 2.75rem;
+    opacity: 0.85;
+    margin-bottom: 0;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+}
+.home-tile-small-text {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+html.no-flex-gap .home-tile-small-text > * + * {
+    margin-top: 0.25rem;
+}
+.home-tile-small .home-tile-label {
+    position: static;
+    font-size: 1.5rem;
+}
+.home-tile-small .home-tile-sub {
+    position: static;
+    font-size: 0.9375rem;
+}
+.home-tile-small.tile-catchup {
+    background: linear-gradient(135deg, #060e12 0%, #1b1b20 70%);
+    background: linear-gradient(135deg, #060e12 0%, var(--bg3) 70%);
+    border-color: #0c1a20;
+}
+.home-tile-small.tile-catchup:hover,
+.home-tile-small.tile-catchup.tv-focus-visible {
+    border-color: #1a8888;
+    background: linear-gradient(135deg, #081418 0%, #242428 70%);
+    background: linear-gradient(135deg, #081418 0%, var(--bg4) 70%);
+}
+.home-tile-small.tile-settings {
+    background: #1b1b20;
+    background: var(--bg3);
+}
+.home-tile-small.tile-settings:hover,
+.home-tile-small.tile-settings.tv-focus-visible {
+    border-color: #c9990a;
+    border-color: var(--gold-dim);
+    background: #242428;
+    background: var(--bg4);
+}
+.home-tile-small.tile-settings.tv-focus-visible {
+    box-shadow: 0 0 0 4px #c9990a;
+    box-shadow: 0 0 0 4px var(--gold-dim);
+}

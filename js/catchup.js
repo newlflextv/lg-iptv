@@ -117,8 +117,13 @@
     }
 
     function loadChannels() {
-        var chKey = 'cu_channels_' + Config.base(cfg);
-        var catKey = 'cu_cats_' + Config.base(cfg);
+        /* Keyed by account (host + username), not by the server URL alone:
+           two lines on one provider share a host but not a channel package,
+           and the second saw the first one's catch-up list. */
+        var chKey = 'cu_channels_' + Config.scope(cfg);
+        var catKey = 'cu_cats_' + Config.scope(cfg);
+        Store.removeByPrefix('cu_channels_http');     // the old URL-keyed entries
+        Store.removeByPrefix('cu_cats_http');
         var cachedCh = Store.cacheGet(chKey), cachedCat = Store.cacheGet(catKey);
         if (cachedCh && cachedCh.length) {
             allChannels = cachedCh;
@@ -520,16 +525,18 @@
         var title = (chName || '') + ' · ' + (decode(e.title) || '');
         /* Same one-shot pairing the VOD path uses — see player-vod.js. */
         var token = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-        try {
-            localStorage.setItem('iptv_play_url', urls[0]);
-            localStorage.setItem('iptv_play_title', title);
-            localStorage.setItem('iptv_play_meta', JSON.stringify({
-                url: urls[0], token: token, urls: urls, type: 'catchup', name: title, icon: chIcon || '',
-                /* The OSD title is "Channel · Programme", which matches nothing
-                   on OpenSubtitles. Search for the programme alone. */
-                search_name: decode(e.title) || ''
-            }));
-        } catch (err) {}
+        /* Through Store: a full storage quota makes room by dropping a cache,
+           rather than failing the write and handing the player the previous
+           play's metadata (which it then rightly rejects, losing the second
+           timeshift URL to fall back on). */
+        Store.setRaw('iptv_play_url', urls[0]);
+        Store.setRaw('iptv_play_title', title);
+        Store.set('iptv_play_meta', {
+            url: urls[0], token: token, urls: urls, type: 'catchup', name: title, icon: chIcon || '',
+            /* The OSD title is "Channel · Programme", which matches nothing
+               on OpenSubtitles. Search for the programme alone. */
+            search_name: decode(e.title) || ''
+        });
         window.location.href = '../pages/player.html?t=' + encodeURIComponent(token) +
                                '&url=' + encodeURIComponent(urls[0]) +
                                '&title=' + encodeURIComponent(title);
@@ -680,7 +687,7 @@
     }
 
     window.addEventListener('keydown', function (e) {
-        var kc = e.keyCode || e.which;
+        var kc = Dom.keyCode(e);   // also maps remotes that send only a named key
 
         if (document.activeElement === elSearch) {
             if (kc === KEY.DOWN) { e.preventDefault(); elSearch.blur(); sideIndex = 0; sideSub = 'row'; focusSidebar(); }
@@ -716,7 +723,7 @@
     if (typeof window.tvGoBack !== 'function') {
         window.tvGoBack = function (backUrl) {
             if (backUrl) { window.location.href = backUrl; }
-            else if (typeof webOS !== 'undefined' && webOS.platformBack) { webOS.platformBack(); }
+            else { Dom.exitApp(); }
         };
     }
 

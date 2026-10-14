@@ -4,12 +4,6 @@ function _regenerator() { /*! regenerator-runtime -- Copyright (c) 2014-present,
 function _regeneratorDefine2(e, r, n, t) { var i = Object.defineProperty; try { i({}, "", {}); } catch (e) { i = 0; } _regeneratorDefine2 = function _regeneratorDefine(e, r, n, t) { function o(r, n) { _regeneratorDefine2(e, r, function (e) { return this._invoke(r, n, e); }); } r ? i ? i(e, r, { value: n, enumerable: !t, configurable: !t, writable: !t }) : e[r] = n : (o("next", 0), o("throw", 1), o("return", 2)); }, _regeneratorDefine2(e, r, n, t); }
 function asyncGeneratorStep(n, t, e, r, o, a, c) { try { var i = n[a](c), u = i.value; } catch (n) { return void e(n); } i.done ? t(u) : Promise.resolve(u).then(r, o); }
 function _asyncToGenerator(n) { return function () { var t = this, e = arguments; return new Promise(function (r, o) { var a = n.apply(t, e); function _next(n) { asyncGeneratorStep(a, r, o, _next, _throw, "next", n); } function _throw(n) { asyncGeneratorStep(a, r, o, _next, _throw, "throw", n); } _next(void 0); }); }; }
-function _slicedToArray(r, e) { return _arrayWithHoles(r) || _iterableToArrayLimit(r, e) || _unsupportedIterableToArray(r, e) || _nonIterableRest(); }
-function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
-function _unsupportedIterableToArray(r, a) { if (r) { if ("string" == typeof r) return _arrayLikeToArray(r, a); var t = {}.toString.call(r).slice(8, -1); return "Object" === t && r.constructor && (t = r.constructor.name), "Map" === t || "Set" === t ? Array.from(r) : "Arguments" === t || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(t) ? _arrayLikeToArray(r, a) : void 0; } }
-function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length); for (var e = 0, n = Array(a); e < a; e++) n[e] = r[e]; return n; }
-function _iterableToArrayLimit(r, l) { var t = null == r ? null : "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (null != t) { var e, n, i, u, a = [], f = !0, o = !1; try { if (i = (t = t.call(r)).next, 0 === l) { if (Object(t) !== t) return; f = !1; } else for (; !(f = (e = i.call(t)).done) && (a.push(e.value), a.length !== l); f = !0); } catch (r) { o = !0, n = r; } finally { try { if (!f && null != t.return && (u = t.return(), Object(u) !== u)) return; } finally { if (o) throw n; } } return a; } }
-function _arrayWithHoles(r) { if (Array.isArray(r)) return r; }
 // ── M3U / M3U8 playlist support ───────────────────────────────────────────────
 //
 // Parses a remote M3U8 playlist URL and returns channels + categories in the
@@ -17,20 +11,30 @@ function _arrayWithHoles(r) { if (Array.isArray(r)) return r; }
 // app works without changes.
 //
 // #EXTINF attributes understood:
-//   tvg-id, tvg-name, tvg-logo, tvg-chno, group-title
+//   tvg-id, tvg-name, tvg-logo, group-title   (and #EXTGRP for the group)
+// #EXTM3U attributes understood:
+//   url-tvg / x-tvg-url — the playlist's own XMLTV guide
 
-var M3U_CACHE_KEY = "iptv_m3u_v1";
+/* Keyed by the playlist URL. The old single key ("iptv_m3u_v1") survived a
+   profile editing its playlist URL, so the previous playlist's channels kept
+   loading from cache for up to four hours after the change. */
+var M3U_CACHE_PREFIX = "iptv_m3u_v2:";
+var M3U_CACHE_LEGACY = "iptv_m3u_v1";
 var M3U_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+var M3U_TIMEOUT_MS = 45000; // a 20 000-channel playlist is several MB
 
+/* The active profile's playlist. Read from the profile itself — the separate
+   "iptv_m3u_config" key is only kept in step by the Save button, so any other
+   way of activating a profile left Live TV loading the previous playlist (or
+   none). The old key is still honoured for installs from before profiles. */
 function m3uLoadConfig() {
   var _window$IPTV_M3U_CONF;
-  var stored = function () {
-    try {
-      return JSON.parse(localStorage.getItem("iptv_m3u_config"));
-    } catch (_unused) {
-      return null;
-    }
-  }();
+  var cfg = null;
+  try {
+    cfg = Config.resolve();
+  } catch (_) {}
+  if (cfg && cfg.type === "m3u" && cfg.playlist_url) return Promise.resolve(cfg);
+  var stored = Store.get("iptv_m3u_config", null);
   if (stored !== null && stored !== void 0 && stored.playlist_url) return Promise.resolve(stored);
   if ((_window$IPTV_M3U_CONF = window.IPTV_M3U_CONFIG) !== null && _window$IPTV_M3U_CONF !== void 0 && _window$IPTV_M3U_CONF.playlist_url) return Promise.resolve(window.IPTV_M3U_CONFIG);
   return Promise.reject(new Error("No M3U playlist URL configured"));
@@ -38,36 +42,46 @@ function m3uLoadConfig() {
 
 // ── Disk cache ────────────────────────────────────────────────────────────────
 
-function m3uLoadCache() {
-  try {
-    var raw = localStorage.getItem(M3U_CACHE_KEY);
-    if (!raw) return null;
-    var _JSON$parse = JSON.parse(raw),
-      ts = _JSON$parse.ts,
-      channels = _JSON$parse.channels,
-      categories = _JSON$parse.categories;
-    if (Date.now() - ts > M3U_TTL_MS) return null;
-    return {
-      channels: channels,
-      categories: categories
-    };
-  } catch (_unused2) {
-    return null;
-  }
+function _m3uCacheKey(url) {
+  return M3U_CACHE_PREFIX + Config.hash(String(url || ""));
 }
-function m3uSaveCache(channels, categories) {
-  try {
-    localStorage.setItem(M3U_CACHE_KEY, JSON.stringify({
-      ts: Date.now(),
-      channels: channels,
-      categories: categories
-    }));
-  } catch (_unused3) {}
+
+/* `_source` is the same on every row, and at 20 000 channels that one field
+   is a few hundred KB of a ~5 MB store — so it is dropped on the way in and
+   put back on the way out. */
+function m3uLoadCache(url) {
+  Store.remove(M3U_CACHE_LEGACY);
+  var hit = Store.cacheGet(_m3uCacheKey(url), M3U_TTL_MS);
+  if (!hit || !Array.isArray(hit.channels) || !hit.channels.length) return null;
+  hit.channels.forEach(function (ch) {
+    ch._source = "m3u";
+  });
+  return {
+    channels: hit.channels,
+    categories: hit.categories || [],
+    epgUrl: hit.epgUrl || ""
+  };
+}
+function m3uSaveCache(url, parsed) {
+  var channels = parsed.channels.map(function (ch) {
+    return {
+      stream_id: ch.stream_id,
+      name: ch.name,
+      stream_icon: ch.stream_icon,
+      epg_channel_id: ch.epg_channel_id,
+      category_id: ch.category_id,
+      stream_url: ch.stream_url
+    };
+  });
+  Store.cacheSet(_m3uCacheKey(url), {
+    channels: channels,
+    categories: parsed.categories,
+    epgUrl: parsed.epgUrl || ""
+  });
 }
 function m3uClearCache() {
-  try {
-    localStorage.removeItem(M3U_CACHE_KEY);
-  } catch (_unused4) {}
+  Store.remove(M3U_CACHE_LEGACY);
+  Store.removeByPrefix(M3U_CACHE_PREFIX);
 }
 
 // ── Parser ────────────────────────────────────────────────────────────────────
@@ -76,22 +90,53 @@ var _attrReCache = {};
 function _parseAttr(extinf, attr) {
   var re = _attrReCache[attr];
   // Handles: attr="value"  attr='value'  attr=value (unquoted)
-  if (!re) re = _attrReCache[attr] = new RegExp(attr + '=(?:"([^"]*)"|\'([^\']*)\'|([^\\s"\']*))');
+  if (!re) re = _attrReCache[attr] = new RegExp('(?:^|[\\s,])' + attr + '=(?:"([^"]*)"|\'([^\']*)\'|([^\\s"\',]*))', "i");
   var m = extinf.match(re);
   return m ? (m[1] !== undefined ? m[1] : m[2] !== undefined ? m[2] : m[3] || "").trim() : "";
 }
+
+/* The display name is whatever follows the first comma that is NOT inside a
+   quoted attribute. Splitting on the first comma outright broke on the very
+   common group-title="News, UK": the "name" became ` UK" tvg-logo=…,BBC One`. */
+function _extinfName(extinf) {
+  var quote = "";
+  for (var i = 0; i < extinf.length; i++) {
+    var c = extinf[i];
+    if (quote) {
+      if (c === quote) quote = "";
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      continue;
+    }
+    if (c === ",") return extinf.slice(i + 1).trim();
+  }
+  return "";
+}
 function m3uParse(text) {
   // Normalise all line-ending styles (\r\n, \r, \n) before splitting
-  var lines = text.replace(/\r\n?/g, "\n").split("\n");
+  var lines = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n").split("\n");
   var channels = [];
   var catSet = new Map(); // category_name → category_id
   var extinf = null;
+  var extgrp = "";
   var streamId = 1;
+  var epgUrl = "";
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i].trim();
     if (!line) continue;
+    if (line.startsWith("#EXTM3U")) {
+      epgUrl = (_parseAttr(line, "url-tvg") || _parseAttr(line, "x-tvg-url")).split(",")[0].trim();
+      continue;
+    }
     if (line.startsWith("#EXTINF")) {
       extinf = line;
+      extgrp = "";
+      continue;
+    }
+    if (line.startsWith("#EXTGRP:")) {
+      extgrp = line.slice(8).trim();
       continue;
     }
 
@@ -100,10 +145,10 @@ function m3uParse(text) {
 
     // This line is a URL — pair with the preceding #EXTINF
     if (extinf) {
-      var name = extinf.replace(/^#EXTINF[^,]*,/, "").trim();
+      var name = _extinfName(extinf) || _parseAttr(extinf, "tvg-name") || "Unknown";
       var tvgId = _parseAttr(extinf, "tvg-id") || _parseAttr(extinf, "tvg-name") || name;
       var logo = _parseAttr(extinf, "tvg-logo");
-      var group = _parseAttr(extinf, "group-title") || "Uncategorised";
+      var group = _parseAttr(extinf, "group-title") || extgrp || "Uncategorised";
       if (!catSet.has(group)) catSet.set(group, String(catSet.size + 1));
       var categoryId = catSet.get(group);
       channels.push({
@@ -118,72 +163,51 @@ function m3uParse(text) {
         _source: "m3u"
       });
       extinf = null;
+      extgrp = "";
     }
   }
-  var categories = Array.from(catSet.entries()).map(function (_ref) {
-    var _ref2 = _slicedToArray(_ref, 2),
-      name = _ref2[0],
-      id = _ref2[1];
-    return {
+  var categories = [];
+  catSet.forEach(function (id, name) {
+    categories.push({
       category_id: id,
       category_name: name
-    };
+    });
   });
   return {
     channels: channels,
-    categories: categories
+    categories: categories,
+    epgUrl: epgUrl
   };
 }
 
 // ── Fetch + parse ─────────────────────────────────────────────────────────────
+
+/* Through Net so the timeout is real on every webOS version — a bare fetch +
+   AbortController never timed out on webOS 4/5, where the controller is a stub. */
 function m3uFetchPlaylist(_x) {
   return _m3uFetchPlaylist.apply(this, arguments);
 } // ── Public API (mirrors xtream shape) ─────────────────────────────────────────
 function _m3uFetchPlaylist() {
   _m3uFetchPlaylist = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee(url) {
-    var ctrl, tid, res, text, _t;
+    var text;
     return _regenerator().w(function (_context) {
-      while (1) switch (_context.p = _context.n) {
+      while (1) switch (_context.n) {
         case 0:
-          ctrl = new AbortController();
-          tid = setTimeout(function () {
-            return ctrl.abort();
-          }, 30000); // covers both fetch + body read
-          _context.p = 1;
-          _context.n = 2;
-          return fetch(url, {
-            signal: ctrl.signal
+          _context.n = 1;
+          return Net.text(url, {
+            timeout: M3U_TIMEOUT_MS
           });
-        case 2:
-          res = _context.v;
-          if (res.ok) {
-            _context.n = 3;
-            break;
-          }
-          throw new Error("HTTP " + res.status);
-        case 3:
-          _context.n = 4;
-          return res.text();
-        case 4:
+        case 1:
           text = _context.v;
-          // body still covered by abort signal
-          clearTimeout(tid);
-          if (text.includes("#EXTM3U")) {
-            _context.n = 5;
+          if (!(text.indexOf("#EXTINF") === -1)) {
+            _context.n = 2;
             break;
           }
           throw new Error("Not a valid M3U playlist");
-        case 5:
+        case 2:
           return _context.a(2, m3uParse(text));
-        case 6:
-          _context.p = 6;
-          _t = _context.v;
-          clearTimeout(tid);
-          throw _t;
-        case 7:
-          return _context.a(2);
       }
-    }, _callee, null, [[1, 6]]);
+    }, _callee);
   }));
   return _m3uFetchPlaylist.apply(this, arguments);
 }

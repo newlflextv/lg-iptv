@@ -28,7 +28,13 @@ function lazyImg(img, src) {
 }
 
 /* ── Card factory ────────────────────────────────────────────────── */
-function posterOf(m) { return m.stream_icon || m.cover || m.cover_big || m.icon || m.backdrop_path || ''; }
+/* backdrop_path is an ARRAY of URLs on most panels' series entries; used as
+   an image source directly it became "url1,url2" and never loaded. */
+function posterOf(m) {
+    var p = m.stream_icon || m.cover || m.cover_big || m.icon || m.backdrop_path || '';
+    if (Array.isArray(p)) p = p[0] || '';
+    return String(p);
+}
 function titleOf(m)  { return m.name || m.title || 'Untitled'; }
 function yearOf(m)   { return String(m.year || m.releaseDate || m.releasedate || '').slice(0, 4); }
 function ratingOf(m) { return parseFloat(m.rating || m.rating_5based || 0) || 0; }

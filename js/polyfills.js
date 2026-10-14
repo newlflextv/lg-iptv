@@ -10,6 +10,248 @@
 (function () {
     'use strict';
 
+    var G = typeof window !== 'undefined' ? window : this;
+
+    /* ── Promise (webOS 1.x/2.x) ─────────────────────────────────────────────
+       Every Chromium webOS has Promise; the WebKit browser in webOS 1 and 2 may
+       not, and without it nothing in this app runs at all — every page starts
+       with a fetch or an async function. Minimal but spec-shaped: thenables
+       are adopted, handlers run asynchronously, and a rejection with no
+       handler is simply dropped (there is no console to report it to). */
+    if (typeof G.Promise !== 'function') {
+        var asap = function (fn) { setTimeout(fn, 0); };
+        var P = function (executor) {
+            var self = this;
+            self._state = 0;            // 0 pending, 1 fulfilled, 2 rejected
+            self._value = undefined;
+            self._handlers = [];
+            var done = false;
+            function settle(state, value) {
+                if (self._state) return;
+                self._state = state; self._value = value;
+                var hs = self._handlers; self._handlers = [];
+                for (var i = 0; i < hs.length; i++) handle(self, hs[i]);
+            }
+            function resolve(value) {
+                if (done) return; done = true;
+                if (value === self) { settle(2, new TypeError('Promise resolved with itself')); return; }
+                if (value && (typeof value === 'object' || typeof value === 'function')) {
+                    var then;
+                    try { then = value.then; } catch (e) { settle(2, e); return; }
+                    if (typeof then === 'function') {
+                        var called = false;
+                        try {
+                            then.call(value,
+                                function (v) { if (called) return; called = true; done = false; resolve(v); },
+                                function (r) { if (called) return; called = true; settle(2, r); });
+                        } catch (e) { if (!called) settle(2, e); }
+                        return;
+                    }
+                }
+                settle(1, value);
+            }
+            function reject(reason) { if (done) return; done = true; settle(2, reason); }
+            try { executor(resolve, reject); } catch (e) { reject(e); }
+        };
+        var handle = function (p, h) {
+            if (!p._state) { p._handlers.push(h); return; }
+            asap(function () {
+                var cb = p._state === 1 ? h.onFulfilled : h.onRejected;
+                if (typeof cb !== 'function') {
+                    if (p._state === 1) h.resolve(p._value); else h.reject(p._value);
+                    return;
+                }
+                var out;
+                try { out = cb(p._value); } catch (e) { h.reject(e); return; }
+                h.resolve(out);
+            });
+        };
+        P.prototype.then = function (onFulfilled, onRejected) {
+            var self = this;
+            return new P(function (resolve, reject) {
+                handle(self, { onFulfilled: onFulfilled, onRejected: onRejected, resolve: resolve, reject: reject });
+            });
+        };
+        P.prototype['catch'] = function (onRejected) { return this.then(null, onRejected); };
+        P.resolve = function (v) { return (v instanceof P) ? v : new P(function (res) { res(v); }); };
+        P.reject  = function (r) { return new P(function (res, rej) { rej(r); }); };
+        P.all = function (list) {
+            return new P(function (resolve, reject) {
+                var arr = Array.prototype.slice.call(list), left = arr.length, out = new Array(arr.length);
+                if (!left) { resolve(out); return; }
+                arr.forEach(function (item, i) {
+                    P.resolve(item).then(function (v) { out[i] = v; if (--left === 0) resolve(out); }, reject);
+                });
+            });
+        };
+        P.race = function (list) {
+            return new P(function (resolve, reject) {
+                Array.prototype.slice.call(list).forEach(function (item) { P.resolve(item).then(resolve, reject); });
+            });
+        };
+        G.Promise = P;
+    }
+
+    /* ── Map / Set (webOS 1.x/2.x) ───────────────────────────────────────────
+       Only what this app uses: get/set/has/delete/clear/forEach/size, keys(),
+       values(), entries(). Linear lookup — the largest map here is the Live
+       TV row cache, capped at a few hundred entries. */
+    function makeIter(arr) {
+        var i = 0;
+        var it = { next: function () { return i < arr.length ? { value: arr[i++], done: false } : { value: undefined, done: true }; } };
+        if (typeof Symbol !== 'undefined' && Symbol.iterator) it[Symbol.iterator] = function () { return this; };
+        return it;
+    }
+    if (typeof G.Map !== 'function') {
+        var M = function (iterable) {
+            this._k = []; this._v = []; this.size = 0;
+            if (iterable) for (var i = 0; i < iterable.length; i++) this.set(iterable[i][0], iterable[i][1]);
+        };
+        M.prototype.indexOf = function (k) {
+            for (var i = 0; i < this._k.length; i++) if (this._k[i] === k || (k !== k && this._k[i] !== this._k[i])) return i;
+            return -1;
+        };
+        M.prototype.get = function (k) { var i = this.indexOf(k); return i < 0 ? undefined : this._v[i]; };
+        M.prototype.has = function (k) { return this.indexOf(k) >= 0; };
+        M.prototype.set = function (k, v) {
+            var i = this.indexOf(k);
+            if (i < 0) { this._k.push(k); this._v.push(v); this.size++; } else this._v[i] = v;
+            return this;
+        };
+        M.prototype['delete'] = function (k) {
+            var i = this.indexOf(k);
+            if (i < 0) return false;
+            this._k.splice(i, 1); this._v.splice(i, 1); this.size--;
+            return true;
+        };
+        M.prototype.clear = function () { this._k = []; this._v = []; this.size = 0; };
+        M.prototype.forEach = function (cb, thisArg) {
+            var ks = this._k.slice(), vs = this._v.slice();
+            for (var i = 0; i < ks.length; i++) cb.call(thisArg, vs[i], ks[i], this);
+        };
+        M.prototype.keys    = function () { return makeIter(this._k.slice()); };
+        M.prototype.values  = function () { return makeIter(this._v.slice()); };
+        M.prototype.entries = function () {
+            var out = [];
+            for (var i = 0; i < this._k.length; i++) out.push([this._k[i], this._v[i]]);
+            return makeIter(out);
+        };
+        G.Map = M;
+    }
+    if (typeof G.Set !== 'function') {
+        var S = function (iterable) {
+            this._m = new G.Map(); this.size = 0;
+            if (iterable) for (var i = 0; i < iterable.length; i++) this.add(iterable[i]);
+        };
+        S.prototype.add = function (v) { this._m.set(v, v); this.size = this._m.size; return this; };
+        S.prototype.has = function (v) { return this._m.has(v); };
+        S.prototype['delete'] = function (v) { var r = this._m['delete'](v); this.size = this._m.size; return r; };
+        S.prototype.clear = function () { this._m.clear(); this.size = 0; };
+        S.prototype.forEach = function (cb, thisArg) {
+            var self = this;
+            this._m.forEach(function (v) { cb.call(thisArg, v, v, self); });
+        };
+        S.prototype.values = S.prototype.keys = function () { return this._m.keys(); };
+        S.prototype.entries = function () { return this._m.entries(); };
+        G.Set = S;
+    }
+
+    /* ── Map / Set constructed from an iterable (early Chromium) ──────────────
+       `new Set(array)` is how this app builds every lookup set. Where the
+       constructor ignores its argument the set is silently empty — no error,
+       just categories that never hide and favourites that never match — so it
+       is tested, not assumed. */
+    (function () {
+        function wrap(name, add) {
+            var Native = G[name];
+            var ok = false;
+            try { ok = new Native([[1, 1]]).size === 1; } catch (e) {}
+            if (ok) return;
+            var Wrapped = function (iterable) {
+                var inst = new Native();
+                if (iterable) {
+                    /* Array.from (polyfilled below if needed) also walks an
+                       iterator such as another Map's keys(), which slice can't. */
+                    var arr = Array.from ? Array.from(iterable) : Array.prototype.slice.call(iterable);
+                    for (var i = 0; i < arr.length; i++) add(inst, arr[i]);
+                }
+                return inst;
+            };
+            Wrapped.prototype = Native.prototype;
+            G[name] = Wrapped;
+        }
+        wrap('Map', function (m, pair) { m.set(pair[0], pair[1]); });
+        wrap('Set', function (s, v) { s.add(v); });
+    }());
+
+    /* ── NodeList / HTMLCollection iteration (Chrome 51+) ─────────────────────
+       Babel compiles `for…of` and array spread into helpers that look for
+       Symbol.iterator, and old Chromium's NodeList has none — so the helper
+       throws "non-iterable instance" and takes the page down with it. Array's
+       own iterator works on anything array-like. */
+    if (typeof Symbol !== 'undefined' && Symbol.iterator && Array.prototype[Symbol.iterator]) {
+        if (typeof NodeList !== 'undefined' && !NodeList.prototype[Symbol.iterator]) {
+            NodeList.prototype[Symbol.iterator] = Array.prototype[Symbol.iterator];
+        }
+        if (typeof HTMLCollection !== 'undefined' && !HTMLCollection.prototype[Symbol.iterator]) {
+            HTMLCollection.prototype[Symbol.iterator] = Array.prototype[Symbol.iterator];
+        }
+    }
+
+    /* ── Typed array methods (Chrome 45+) ─────────────────────────────────────
+       hls.js slices, fills and searches Uint8Arrays throughout its MPEG-TS
+       demuxer. Chromium 38 (webOS 3) has typed arrays but none of these
+       methods, so the HLS engine died on the first segment it tried to parse
+       and every stream that needed it failed. Each method borrows the generic
+       Array implementation, which works on any array-like; slice() is the
+       exception, because it must return a typed array of the same kind. */
+    (function () {
+        var kinds = ['Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array', 'Uint16Array',
+                     'Int32Array', 'Uint32Array', 'Float32Array', 'Float64Array'];
+        var generic = ['indexOf', 'lastIndexOf', 'join', 'forEach', 'every', 'some',
+                       'reduce', 'reduceRight', 'reverse', 'find', 'findIndex', 'includes', 'fill'];
+        function borrow(name) {
+            var fn = Array.prototype[name];
+            return function () { return fn.apply(this, arguments); };
+        }
+        kinds.forEach(function (k) {
+            var T = G[k];
+            if (!T || !T.prototype) return;
+            var proto = T.prototype;
+            generic.forEach(function (name) {
+                if (!proto[name] && Array.prototype[name]) proto[name] = borrow(name);
+            });
+            if (!proto.slice) {
+                proto.slice = function (begin, end) {
+                    var sub = this.subarray(begin || 0, end === undefined ? this.length : end);
+                    var out = new this.constructor(sub.length);
+                    out.set(sub);
+                    return out;
+                };
+            }
+            if (!proto.map) {
+                proto.map = function (cb, thisArg) {
+                    var out = new this.constructor(this.length);
+                    for (var i = 0; i < this.length; i++) out[i] = cb.call(thisArg, this[i], i, this);
+                    return out;
+                };
+            }
+            if (!proto.filter) {
+                proto.filter = function (cb, thisArg) {
+                    var kept = [];
+                    for (var i = 0; i < this.length; i++) if (cb.call(thisArg, this[i], i, this)) kept.push(this[i]);
+                    return new this.constructor(kept);
+                };
+            }
+            if (!T.from) {
+                T.from = function (src, mapFn, thisArg) { return new T(Array.from(src, mapFn, thisArg)); };
+            }
+            if (!T.of) {
+                T.of = function () { return new T(Array.prototype.slice.call(arguments)); };
+            }
+        });
+    }());
+
     /* ── Array.from (Chrome 45+) ─────────────────────────────────────────── */
     if (!Array.from) {
         Array.from = function (arrayLike, mapFn, thisArg) {
@@ -302,11 +544,17 @@
                         }
                     }
                 }
+                /* A file inside the app package (appinfo.json, say) loads with
+                   status 0 — there is no HTTP on file:// — so 0 from a local URL
+                   is a success, not a failure. */
+                var isLocal = /^file:/i.test(url) ||
+                    (!/^[a-z][a-z0-9+.\-]*:/i.test(url) && location.protocol === 'file:');
                 xhr.onload = function () {
                     var body = 'response' in xhr ? xhr.response : xhr.responseText;
+                    var status = (xhr.status === 0 && isLocal) ? 200 : xhr.status;
                     resolve({
-                        ok:     xhr.status >= 200 && xhr.status < 300,
-                        status: xhr.status,
+                        ok:     status >= 200 && status < 300,
+                        status: status,
                         /* Enough of the Headers interface for the one thing the
                            app does with it: refusing to read a response body
                            that turns out to be a 2 GB movie rather than the

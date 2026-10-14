@@ -40,16 +40,23 @@
     }
 
     var WEBOS_BY_CHROMIUM = {
-        38: '3.x', 53: '4.x', 68: '5.x', 79: '6.x', 87: '22', 94: '23', 108: '24'
+        38: '3.x', 53: '4.x', 68: '5.x', 79: '6.x', 87: '22', 94: '23', 108: '24', 120: '25'
     };
 
     var chromium = chromiumVersion();
     var isWebOS  = /Web0S|webOS/i.test(navigator.userAgent || '');
 
-    /* A missing/unparseable Chromium version means a desktop browser used for
-       development, not an ancient TV — treat unknown as modern so testing
-       isn't silently done against the legacy code paths. */
-    var isLegacy = chromium > 0 && chromium <= 68;
+    /* webOS 1.x and 2.x predate Chromium entirely — their browser is WebKit
+       (537/538) and the user agent carries no Chrome/ token at all. Those are
+       the OLDEST sets, so "no Chromium version" on webOS means legacy, not
+       modern; it used to fall through to the modern tier and get the rounded,
+       clipped PiP that the hardware video plane can't display. */
+    var preChromiumWebOS = isWebOS && !chromium;
+
+    /* Off webOS, a missing/unparseable Chromium version means a desktop
+       browser used for development, not an ancient TV — treat unknown as
+       modern so testing isn't silently done against the legacy code paths. */
+    var isLegacy = (chromium > 0 && chromium <= 68) || preChromiumWebOS;
 
     /* ── VIDEO PLANE ──────────────────────────────────────────────────────────
        On legacy webOS the decoder writes straight to a hardware overlay plane
@@ -89,11 +96,35 @@
     try { pipMode = localStorage.getItem(PIP_MODE_KEY) || 'auto'; } catch (e) { pipMode = 'auto'; }
     if (pipMode !== 'compat' && pipMode !== 'standard') pipMode = 'auto';
 
+    /* ── Flex gap ─────────────────────────────────────────────────────────────
+       `gap` on a flex container only works from Chromium 84 — so not on webOS
+       3, 4, 5 or 6 — and an unsupported gap is silently zero. The generated
+       stylesheets (tools/build-css.js) carry margin equivalents scoped to
+       html.no-flex-gap. Measured rather than inferred from the version: a
+       two-child column with a 1px row-gap is 1px tall exactly when gap works. */
+    function supportsFlexGap() {
+        try {
+            var probe = document.createElement('div');
+            probe.style.cssText = 'display:flex;flex-direction:column;row-gap:1px;' +
+                                  'position:absolute;visibility:hidden';
+            probe.appendChild(document.createElement('div'));
+            probe.appendChild(document.createElement('div'));
+            docEl.appendChild(probe);
+            var ok = probe.scrollHeight === 1;
+            docEl.removeChild(probe);
+            return ok;
+        } catch (e) {
+            return chromium >= 84;
+        }
+    }
+    var flexGap = supportsFlexGap();
+
     var classes = ['plat-chromium-' + (chromium || 'unknown')];
     if (isWebOS)        classes.push('plat-webos');
     if (isLegacy)       classes.push('plat-legacy');
     else                classes.push('plat-modern');
     if (videoPlaneOnly) classes.push('plat-video-plane');
+    if (!flexGap)       classes.push('no-flex-gap');
     if (pipMode !== 'auto') classes.push('pip-' + pipMode);
 
     docEl.className = (docEl.className ? docEl.className + ' ' : '') + classes.join(' ');
@@ -109,12 +140,14 @@
         isLegacy:       isLegacy,
         videoPlaneOnly: videoPlaneOnly,
         maxDecoders:    maxDecoders,
-        webosVersion:   WEBOS_BY_CHROMIUM[chromium] || '',
+        flexGap:        flexGap,
+        webosVersion:   WEBOS_BY_CHROMIUM[chromium] || (preChromiumWebOS ? '1.x/2.x' : ''),
         PIP_MODE_KEY:   PIP_MODE_KEY,
         pipMode:        pipMode,
         pipCompatActive: pipCompatActive,
         /* Human-readable one-liner for Settings → Diagnostics. */
         describe: function () {
+            if (preChromiumWebOS) return 'WebKit  ·  webOS 1.x/2.x';
             var s = chromium ? 'Chromium ' + chromium : 'Chromium unknown';
             if (WEBOS_BY_CHROMIUM[chromium]) s += '  ·  webOS ' + WEBOS_BY_CHROMIUM[chromium];
             else if (isWebOS) s += '  ·  webOS (unrecognised build)';

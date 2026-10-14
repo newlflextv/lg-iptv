@@ -31,7 +31,7 @@ function openCategory(title, type, catId) {
      refetch rather than showing an empty grid. */
   elCategoryGrid.innerHTML = '<div class="vod-cat-loading">Loading…</div>';
   var action = type === 'series' ? 'get_series' : 'get_vod_streams';
-  fetchCached(ck, apiUrl('action=' + action + '&category_id=' + encodeURIComponent(catId))).then(function (data) {
+  fetchCachedList(ck, apiUrl('action=' + action + '&category_id=' + encodeURIComponent(catId))).then(function (data) {
     if (elCategory.hidden) return; // user left already
     renderCategory(Array.isArray(data) ? data : [], type);
   }).catch(function () {

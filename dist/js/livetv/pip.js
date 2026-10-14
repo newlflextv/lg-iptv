@@ -161,12 +161,12 @@ function showOSD() {
       cur = _findNowNext2.cur,
       next = _findNowNext2.next;
     if (cur) {
-      nowTitle = xtreamDecodeEPG(cur.title);
+      nowTitle = epgTitle(cur);
       nowTime = formatTimeRange(cur);
       progress = calcProgress(cur);
     }
     if (next) {
-      nextTitle = xtreamDecodeEPG(next.title);
+      nextTitle = epgTitle(next);
       nextTime = formatTimeRange(next);
     }
   }

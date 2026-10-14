@@ -257,7 +257,10 @@ function showGroupContextMenu(e, gid) {
     _ctxMenuIndex = 0;
     const items = Array.from(menu.querySelectorAll(".ctx-item"));
     _focusCtxItem(menu, items);
-    setTimeout(() => document.addEventListener("click", closeContextMenus, { once: true }), 0);
+    // Removed by hand: `{ once: true }` is ignored before Chromium 55, which
+    // left one more permanent capture-phase listener per menu opened.
+    const dismiss = () => { document.removeEventListener("click", dismiss); closeContextMenus(); };
+    setTimeout(() => document.addEventListener("click", dismiss), 0);
 }
 function closeContextMenus() { document.querySelectorAll(".ctx-menu").forEach(m => m.remove()); }
 

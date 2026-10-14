@@ -158,6 +158,22 @@ window.Dom = (function () {
         return k === KEY.LEFT || k === KEY.RIGHT || k === KEY.UP || k === KEY.DOWN || k === KEY.ENTER;
     }
 
+    /* Leave the app (BACK on the home screen). With disableBackHistoryAPI set
+       in appinfo.json the platform no longer handles BACK itself, so the app
+       has to ask. `webOS.platformBack()` is what LG documents, but `webOS` only
+       exists when their webOSTV.js library is loaded — and this app doesn't
+       load it — so that call alone threw and BACK did nothing. PalmSystem is
+       the platform object webOSTV.js itself wraps, present on every version. */
+    function exitApp() {
+        try {
+            if (typeof webOS !== 'undefined' && webOS.platformBack) { webOS.platformBack(); return; }
+        } catch (e) {}
+        try {
+            if (typeof PalmSystem !== 'undefined' && PalmSystem.platformBack) { PalmSystem.platformBack(); return; }
+        } catch (e) {}
+        try { window.close(); } catch (e) {}
+    }
+
     /* True when an on-screen keyboard is open over a text field, which means
        the D-pad belongs to the field and not to the page. */
     function typing() {
@@ -172,6 +188,7 @@ window.Dom = (function () {
         clear: clear, show: show,
         RING: RING, clearRings: clearRings, focusRing: focusRing, hasRing: hasRing,
         visible: visible, focusables: focusables,
-        KEY: KEY, keyCode: keyCode, isBack: isBack, isNav: isNav, typing: typing
+        KEY: KEY, keyCode: keyCode, isBack: isBack, isNav: isNav, typing: typing,
+        exitApp: exitApp
     };
 }());

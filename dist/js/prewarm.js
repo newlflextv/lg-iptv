@@ -55,6 +55,12 @@
 
   /* Delayed so the homepage paints and the update check finishes first — a
      20 000-channel download starting during first paint is exactly the stall
-     this file exists to prevent. */
-  setTimeout(run, 4000);
+     this file exists to prevent. The sweep goes first: it frees whatever
+     yesterday's caches are still holding, so the refresh below has room. */
+  setTimeout(function () {
+    try {
+      Store.sweep();
+    } catch (e) {}
+    run();
+  }, 4000);
 })();

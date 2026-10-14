@@ -31,7 +31,7 @@ function tvGoBack(backUrl) {
     if (backUrl) {
         window.location.href = backUrl;
     } else {
-        webOS.platformBack();
+        Dom.exitApp();
     }
 }
 

@@ -1,5 +1,6 @@
 # Files excluded from the packaged .ipk (ares-package reads this, .gitignore-style).
-# The app ships from dist/ (Babel output), assets/, pages/, config/, index.html.
+# The app ships from dist/ (Babel output in dist/js, generated stylesheets in
+# dist/css), assets/, pages/, config/, index.html.
 #
 # Note: only entries with NO counterpart under dist/ are listed, so there's zero
 # risk of accidentally excluding shipped code even if the matcher ignores the
@@ -20,3 +21,4 @@
 /.claude/
 /readme.md
 /manifest.json
+/tools/

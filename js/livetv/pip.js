@@ -165,8 +165,8 @@ function showOSD() {
 
     if (listings && listings.length) {
         const { cur, next } = _findNowNext(listings);
-        if (cur)  { nowTitle  = xtreamDecodeEPG(cur.title);  nowTime  = formatTimeRange(cur);  progress = calcProgress(cur); }
-        if (next) { nextTitle = xtreamDecodeEPG(next.title); nextTime = formatTimeRange(next); }
+        if (cur)  { nowTitle  = epgTitle(cur);  nowTime  = formatTimeRange(cur);  progress = calcProgress(cur); }
+        if (next) { nextTitle = epgTitle(next); nextTime = formatTimeRange(next); }
     }
 
     document.getElementById("fs-osd-now-title").textContent  = nowTitle  || "—";

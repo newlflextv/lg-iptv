@@ -33,18 +33,51 @@ window.Net = function () {
     if (!err || typeof err.status !== 'number') return false;
     return status === undefined ? true : err.status === status;
   }
+
+  /* fetch() with a timeout that holds on every webOS version, resolving with
+     the raw Response whatever its status.
+      The timer rejects the promise ITSELF rather than relying on abort() to
+     make fetch reject. On webOS 4 and 5 there is no real AbortController:
+     polyfills.js stubs it and strips the stub signal before native fetch
+     sees it, so abort() cancels nothing — and when the timeout's only job
+     was to call abort(), a server that accepted the connection and then
+     never answered hung the request forever. That is how a dead entry in a
+     profile's URL list stalled login on "Trying 1/3…" indefinitely instead
+     of moving on to the next one. */
+  function timed(url, init, timeout) {
+    timeout = timeout || DEFAULT_TIMEOUT;
+    var ctrl = new AbortController();
+    init = init || {};
+    init.signal = ctrl.signal;
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      var tid = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        try {
+          ctrl.abort();
+        } catch (e) {}
+        var err = new Error('Timed out after ' + Math.round(timeout / 1000) + 's');
+        err.timeout = true;
+        err.url = url;
+        reject(err);
+      }, timeout);
+      fetch(url, init).then(function (res) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(tid);
+        resolve(res);
+      }, function (err) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(tid);
+        reject(err);
+      });
+    });
+  }
   function request(url, opts) {
     opts = opts || {};
-    var timeout = opts.timeout || DEFAULT_TIMEOUT;
-    var ctrl = new AbortController();
-    var timedOut = false;
-    var tid = setTimeout(function () {
-      timedOut = true;
-      ctrl.abort();
-    }, timeout);
-    var init = {
-      signal: ctrl.signal
-    };
+    var init = {};
     if (opts.method) init.method = opts.method;
     if (opts.headers) init.headers = opts.headers;
     if (opts.body) init.body = opts.body;
@@ -54,19 +87,37 @@ window.Net = function () {
        the key and serves arrayBuffer() regardless, so passing it always is
        safe on both paths. */
     if (opts.responseType) init.responseType = opts.responseType;
-    return fetch(url, init).then(function (res) {
-      clearTimeout(tid);
+    return timed(url, init, opts.timeout).then(function (res) {
       if (!res.ok) throw httpError(res.status, url);
       return res;
-    }, function (err) {
-      clearTimeout(tid);
-      if (timedOut) {
-        var e = new Error('Timed out after ' + Math.round(timeout / 1000) + 's');
-        e.timeout = true;
-        e.url = url;
-        throw e;
+    });
+  }
+
+  /* A file inside the app package — appinfo.json is the one that matters.
+     Native fetch refuses file:// URLs outright on every Chromium, and that is
+     where a webOS app lives, so this is XHR, where a local file arrives with
+     status 0 rather than 200. */
+  function local(url) {
+    return new Promise(function (resolve, reject) {
+      try {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.onload = function () {
+          var ok = xhr.status >= 200 && xhr.status < 300 || xhr.status === 0 && xhr.responseText;
+          if (ok) resolve(xhr.responseText);else reject(httpError(xhr.status, url));
+        };
+        xhr.onerror = function () {
+          reject(new Error('Could not read ' + url));
+        };
+        xhr.send();
+      } catch (e) {
+        reject(e);
       }
-      throw err;
+    });
+  }
+  function localJSON(url) {
+    return local(url).then(function (text) {
+      return JSON.parse(text);
     });
   }
   function json(url, opts) {
@@ -128,9 +179,12 @@ window.Net = function () {
   }
   return {
     DEFAULT_TIMEOUT: DEFAULT_TIMEOUT,
+    timed: timed,
     request: request,
     json: json,
     text: text,
+    local: local,
+    localJSON: localJSON,
     cachedJSON: cachedJSON,
     staleWhileRevalidate: staleWhileRevalidate,
     probeText: probeText,

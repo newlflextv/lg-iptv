@@ -209,7 +209,7 @@ var IPTVPlayer = /*#__PURE__*/function () {
     // Brief centred toast (engine name when cycling).
   }, {
     key: "_flash",
-    value: function _flash(text) {
+    value: function _flash(text, ms) {
       var el = this._flashEl;
       if (!el) {
         el = document.createElement("div");
@@ -223,7 +223,7 @@ var IPTVPlayer = /*#__PURE__*/function () {
       var self = this;
       this._flashTimer = setTimeout(function () {
         if (self._flashEl) self._flashEl.style.display = "none";
-      }, 1500);
+      }, ms || 1500);
     }
 
     // ── Diagnostics overlay (GREEN) ─────────────────────────────────────────────
@@ -312,7 +312,7 @@ var IPTVPlayer = /*#__PURE__*/function () {
         frames = this._decodedFrames();
       var audio = this.listAudioTracks();
       var subs = this.listSubtitles();
-      this._diagEl.textContent = ["engine  : " + (this._activeEngine || "—") + (this._manual ? " (manual)" : "") + "   tier " + ((this._attemptIdx || 0) + 1) + "/" + (this._attempts && this._attempts.length || 1), "res     : " + (v.videoWidth || 0) + "×" + (v.videoHeight || 0), "codec   : " + (this._codecs ? (this._codecs.v || "?") + " / " + (this._codecs.a || "?") : "n/a (native)"), "time    : " + (v.currentTime || 0).toFixed(1) + (isFinite(v.duration) ? " / " + v.duration.toFixed(1) : " (live)") + "   paused:" + v.paused, "ready   : " + v.readyState + "   network:" + v.networkState, "frames  : " + (frames < 0 ? "n/a" : frames), "audio   : " + this._trackSummary(audio, v.audioTracks, typeof v.audioTracks !== "undefined"), "subs    : " + this._trackSummary(subs, v.textTracks, typeof v.textTracks !== "undefined"), "source  : " + this._sourceDesc(), "sub adj : delay " + this.getSubDelay().toFixed(2) + "s   pos " + this.getSubPosition(), "episode : " + _episodeDiag(), "sub src : " + _subsDiag(), "error   : " + (v.error ? _mediaErrText(v.error) : "—"), "lowQ    : " + (this._lowQuality ? "on" : "off"), "tried   : " + (this._diag && this._diag.length ? this._diag.join(" | ") : "—"), "", "(RED cycle · GREEN close · YELLOW lowest)"].join("\n");
+      this._diagEl.textContent = ["engine  : " + (this._activeEngine || "—") + (this._manual ? " (manual)" : "") + "   tier " + ((this._attemptIdx || 0) + 1) + "/" + (this._attempts && this._attempts.length || 1), "res     : " + (v.videoWidth || 0) + "×" + (v.videoHeight || 0), "codec   : " + (this._codecs ? (this._codecs.v || "?") + " / " + (this._codecs.a || "?") : "n/a (native)"), "time    : " + (v.currentTime || 0).toFixed(1) + (isFinite(v.duration) ? " / " + v.duration.toFixed(1) : " (live)") + "   paused:" + v.paused + "   muted:" + v.muted + (this._autoMuted ? " (autoplay)" : ""), "ready   : " + v.readyState + "   network:" + v.networkState, "frames  : " + (frames < 0 ? "n/a" : frames), "audio   : " + this._trackSummary(audio, v.audioTracks, typeof v.audioTracks !== "undefined"), "subs    : " + this._trackSummary(subs, v.textTracks, typeof v.textTracks !== "undefined"), "source  : " + this._sourceDesc(), "sub adj : delay " + this.getSubDelay().toFixed(2) + "s   pos " + this.getSubPosition(), "episode : " + _episodeDiag(), "sub src : " + _subsDiag(), "error   : " + (v.error ? _mediaErrText(v.error) : "—"), "lowQ    : " + (this._lowQuality ? "on" : "off"), "tried   : " + (this._diag && this._diag.length ? this._diag.join(" | ") : "—"), "", "(RED cycle · GREEN close · YELLOW lowest)"].join("\n");
     }
 
     // ── Engine plumbing ─────────────────────────────────────────────────────────
@@ -337,6 +337,7 @@ var IPTVPlayer = /*#__PURE__*/function () {
   }, {
     key: "_resetVideo",
     value: function _resetVideo() {
+      this._dropAttemptListeners();
       try {
         this.video.pause();
       } catch (_) {}
@@ -351,6 +352,95 @@ var IPTVPlayer = /*#__PURE__*/function () {
     key: "_alive",
     value: function _alive(gen, tok) {
       return gen === this._gen && tok === this._tok;
+    }
+
+    /* A one-shot listener for the current attempt. `{ once: true }` is only
+       understood from Chromium 55; before that (webOS 3 and 4) the options
+       object reads as `capture: true` and the listener is never removed — so
+       every channel change left four more listeners on the <video> for the
+       life of the page, and the old 'playing' handlers kept firing on every
+       later stall-and-resume. Tracked so a new attempt can drop the previous
+       attempt's leftovers too. */
+  }, {
+    key: "_once",
+    value: function _once(type, fn) {
+      var v = this.video;
+      var _wrapped = function wrapped(e) {
+        v.removeEventListener(type, _wrapped);
+        fn(e);
+      };
+      v.addEventListener(type, _wrapped);
+      (this._attemptListeners || (this._attemptListeners = [])).push([type, _wrapped]);
+      return _wrapped;
+    }
+  }, {
+    key: "_dropAttemptListeners",
+    value: function _dropAttemptListeners() {
+      var v = this.video;
+      (this._attemptListeners || []).forEach(function (p) {
+        v.removeEventListener(p[0], p[1]);
+      });
+      this._attemptListeners = [];
+    }
+
+    /* video.play(), on every engine.
+         • Before Chromium 50 (webOS 3) play() returns nothing, so the usual
+           `.play().catch(…)` threw "cannot read property 'catch' of undefined"
+           in the middle of starting a stream.
+         • A refusal used to be swallowed without a trace. The one that matters
+           is NotAllowedError — the browser's autoplay policy, which newer
+           webOS builds can enforce on a page with no user gesture yet (the VOD
+           player opens straight into playback). Muted playback is always
+           allowed, so start muted and give the sound back on the next button
+           press, rather than sitting on "Loading…" over a stream that would
+           play fine. */
+  }, {
+    key: "_play",
+    value: function _play(gen, tok) {
+      var self = this;
+      var p;
+      try {
+        p = this.video.play();
+      } catch (_) {
+        return;
+      }
+      if (!p || typeof p.then !== "function") return;
+      p.then(null, function (err) {
+        if (!self._alive(gen, tok)) return;
+        var name = err && err.name || "";
+        if (name === "NotAllowedError" && !self.video.muted) {
+          self._diag.push("autoplay refused → playing muted");
+          self.video.muted = true;
+          self._autoMuted = true;
+          self._play(gen, tok);
+          self._armUnmute();
+          self._flash("Press OK for sound", 5000);
+        } else if (name && name !== "AbortError") {
+          self._diag.push("play() refused: " + name);
+        }
+      });
+    }
+
+    /* The first button press after an autoplay refusal counts as the user
+       gesture the browser wanted, so the sound goes back on inside it. */
+  }, {
+    key: "_armUnmute",
+    value: function _armUnmute() {
+      if (this._unmuteArmed) return;
+      this._unmuteArmed = true;
+      var self = this;
+      var _restore = function restore() {
+        window.removeEventListener("keydown", _restore, true);
+        window.removeEventListener("click", _restore, true);
+        self._unmuteArmed = false;
+        if (!self._autoMuted) return;
+        self._autoMuted = false;
+        /* A secondary player (a Multiview tile) doesn't own its mute
+           state — the grid decides which single tile is audible. */
+        if (typeof self.onAutoplayUnblocked === "function") self.onAutoplayUnblocked();else self.video.muted = false;
+      };
+      window.addEventListener("keydown", _restore, true);
+      window.addEventListener("click", _restore, true);
     }
 
     // `url` may be a single URL or an array of candidate URLs (e.g. catch-up,
@@ -490,6 +580,7 @@ var IPTVPlayer = /*#__PURE__*/function () {
         return;
       }
       var tok = this._tok;
+      this._dropAttemptListeners();
       this._activeEngine = a.label;
       this._playingSince = 0; // set on 'playing'; drives mid-play recovery
       this._reattachExternalSubs();
@@ -564,6 +655,74 @@ var IPTVPlayer = /*#__PURE__*/function () {
       }, 12000);
     }
 
+    /* Data has arrived, so this is not a dead URL — but loaded is not playing.
+       The watchdog used to be switched off at this point, which meant a stream
+       that delivered its first frame and then never started (a decoder that
+       refused it, an autoplay refusal, a 'playing' event the platform never
+       sent) sat on "Loading…" forever with nothing left to move it on. It is
+       re-armed with a longer allowance instead. If the picture turns out to be
+       moving after all, that counts as playing; otherwise the next tier is
+       tried exactly as for any other failure. */
+  }, {
+    key: "_armStarted",
+    value: function _armStarted(gen, tok) {
+      this._clearWatchdog();
+      if (this._manual) return;
+      var self = this,
+        v = this.video;
+      this._watchdog = setTimeout(function () {
+        if (!self._alive(gen, tok)) return;
+        if (!v.paused && v.readyState >= 3 && v.currentTime > 0) {
+          self._onPlaying();
+          return;
+        }
+        self._next(gen, self._activeEngine + ": loaded but never started playing");
+      }, 20000);
+    }
+
+    /* Success signals for one attempt: the 'playing' event, or the clock
+       visibly moving. Some platform pipelines are sparing with 'playing' (it
+       can fire before the first frame, or not at all after a quick start), and
+       a stream that is plainly running must not be left under the "Loading…"
+       veil waiting for an event that already passed. */
+  }, {
+    key: "_watchStart",
+    value: function _watchStart(gen, tok) {
+      var self = this,
+        v = this.video;
+      var done = false,
+        lastT = -1;
+      var succeed = function succeed() {
+        if (done || !self._alive(gen, tok)) return;
+        done = true;
+        self._onPlaying();
+      };
+      this._once("playing", succeed);
+      var _onTime = function onTime() {
+        if (done || !self._alive(gen, tok)) {
+          v.removeEventListener("timeupdate", _onTime);
+          return;
+        }
+        if (v.paused || v.readyState < 3) {
+          lastT = -1;
+          return;
+        }
+        if (lastT >= 0 && v.currentTime > lastT + 0.1) {
+          v.removeEventListener("timeupdate", _onTime);
+          succeed();
+          return;
+        }
+        lastT = v.currentTime;
+      };
+      v.addEventListener("timeupdate", _onTime);
+      this._attemptListeners.push(["timeupdate", _onTime]);
+      this._once("loadeddata", function () {
+        if (!self._alive(gen, tok) || done) return;
+        self._armStarted(gen, tok);
+        if (v.paused) self._play(gen, tok); // the first play() may have run before there was anything to play
+      });
+    }
+
     // Shared success path: the moment a tier genuinely plays, bank it against
     // this content so the next play starts there instead of re-walking the
     // tiers. Recorded on 'playing' rather than on load, because loading proves
@@ -583,33 +742,18 @@ var IPTVPlayer = /*#__PURE__*/function () {
     value: function _playNative(gen, tok, url) {
       if (!this._alive(gen, tok)) return;
       var self = this;
-      var onSuccess = function onSuccess() {
-        if (self._alive(gen, tok)) self._onPlaying();
-      };
-      var onData = function onData() {
-        if (self._alive(gen, tok)) self._clearWatchdog();
-      }; // data flowing → not a stall
       var onMeta = function onMeta() {
         if (self._alive(gen, tok) && self.video.videoWidth) self._res = self.video.videoWidth + "×" + self.video.videoHeight;
       };
       var onError = function onError() {
         if (self._alive(gen, tok)) self._next(gen, "Native: " + _mediaErrText(self.video.error));
       };
-      this.video.addEventListener("playing", onSuccess, {
-        once: true
-      });
-      this.video.addEventListener("loadeddata", onData, {
-        once: true
-      });
-      this.video.addEventListener("loadedmetadata", onMeta, {
-        once: true
-      });
-      this.video.addEventListener("error", onError, {
-        once: true
-      });
+      this._watchStart(gen, tok);
+      this._once("loadedmetadata", onMeta);
+      this._once("error", onError);
       this.video.src = url;
       this.video.load();
-      this.video.play().catch(function () {});
+      this._play(gen, tok);
       this._arm(gen, tok);
     }
   }, {
@@ -685,7 +829,7 @@ var IPTVPlayer = /*#__PURE__*/function () {
             self.hls.currentLevel = 0;
           }
         } catch (_) {}
-        self.video.play().catch(function () {});
+        self._play(gen, tok);
       });
       this.hls.on(Hls.Events.ERROR, function (e, data) {
         if (!self._alive(gen, tok) || !data || !data.fatal) return;
@@ -693,16 +837,7 @@ var IPTVPlayer = /*#__PURE__*/function () {
         if (data.reason) d += " (" + data.reason + ")";
         self._next(gen, "HLS: " + d);
       });
-      this.video.addEventListener("playing", function () {
-        if (self._alive(gen, tok)) self._onPlaying();
-      }, {
-        once: true
-      });
-      this.video.addEventListener("loadeddata", function () {
-        if (self._alive(gen, tok)) self._clearWatchdog();
-      }, {
-        once: true
-      });
+      this._watchStart(gen, tok);
       this._arm(gen, tok);
     }
 
@@ -1372,40 +1507,42 @@ var IPTVPlayer = /*#__PURE__*/function () {
     key: "tryLowestQuality",
     value: function tryLowestQuality() {
       if (!this._urls) return;
+      /* play() resets the low-quality flag for "new" content and reads the
+         content key from its options — so the key is passed back in, or the
+         engine memory for this channel was lost on every YELLOW press. */
+      var key = this._contentKey;
+      this.play(this._urls, {
+        key: key
+      });
       this._lowQuality = true;
-      this.play(this._urls);
       this._flash("Lowest quality");
     }
+
+    /* hls.js is ~400 KB and only needed when a stream reaches the HLS tier, so
+       it loads on first use. One load for the whole page: the in-flight state
+       used to live on each player, so Multiview's four tiles could each append
+       their own copy of the script at the same moment. */
   }, {
     key: "_loadHls",
     value: function _loadHls(callback) {
-      var _this = this;
       if (typeof Hls !== "undefined") {
         callback();
         return;
       }
-      if (this._hlsLoading) {
-        this._hlsCallbacks.push(callback);
-        return;
-      }
-      this._hlsLoading = true;
-      this._hlsCallbacks = [callback];
+      var q = IPTVPlayer._hlsQueue || (IPTVPlayer._hlsQueue = []);
+      q.push(callback);
+      if (q.length > 1) return;
       var s = document.createElement("script");
       s.src = "../assets/hls.min.js";
-      s.onload = function () {
-        _this._hlsLoading = false;
-        _this._hlsCallbacks.forEach(function (fn) {
-          return fn();
+      var flush = function flush() {
+        var fns = IPTVPlayer._hlsQueue || [];
+        IPTVPlayer._hlsQueue = null;
+        fns.forEach(function (fn) {
+          fn();
         });
-        _this._hlsCallbacks = [];
       };
-      s.onerror = function () {
-        _this._hlsLoading = false;
-        _this._hlsCallbacks.forEach(function (fn) {
-          return fn();
-        });
-        _this._hlsCallbacks = [];
-      };
+      s.onload = flush;
+      s.onerror = flush;
       document.head.appendChild(s);
     }
   }]);

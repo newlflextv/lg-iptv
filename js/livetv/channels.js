@@ -58,7 +58,12 @@ const VS_OVERSCAN = 5;
 function measureRowHeight() {
     try {
         const probe = document.createElement("div");
-        probe.style.cssText = "position:absolute;visibility:hidden;height:var(--row-h)";
+        /* The plain 6rem first: an engine without custom properties (webOS 3)
+           drops the var() declaration and keeps it, so the probe still
+           measures the row at the current interface scale instead of 0 —
+           which left VS_ROW_H at the 100%-scale 96px while every row was
+           drawn 120px tall, and the list drifted further off with each row. */
+        probe.style.cssText = "position:absolute;visibility:hidden;height:6rem;height:var(--row-h)";
         document.body.appendChild(probe);
         const h = probe.offsetHeight;
         document.body.removeChild(probe);
@@ -80,6 +85,10 @@ function initVirtualScroll() {
             _vsRafPending = true;
             requestAnimationFrame(() => { _vsRafPending = false; _vsRender(); });
         }
+        // The guide is fetched for the rows around the viewport only, so a
+        // scroll is what asks for the next stretch of it. Debounced: holding
+        // DOWN through a long list must not fire a request per row.
+        scheduleEpgWindowLoad();
     }, { passive: true });
     _vsHeight = wrap.clientHeight || window.innerHeight * 0.55;
 }
@@ -321,6 +330,8 @@ function _doApply() {
     const container = document.getElementById("channel-list");
 
     if (!channels.length) {
+        _vsChannels = [];
+        _keepScrollOnApply = false;
         container.style.height = "auto"; container.style.position = "static";
         const isFavView = activeCategory === "favs";
         let empty;

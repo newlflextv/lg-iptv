@@ -85,8 +85,17 @@ window.Config = function () {
     for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
     return list[0];
   }
+
+  /* 'xtream' | 'm3u', taken from the ACTIVE PROFILE. It used to be read from
+     its own key, which only the Save button kept in step — deleting the
+     active profile or picking one by any other route left it pointing at the
+     previous profile's type, and Live TV then tried to log an M3U playlist
+     into Xtream (or the reverse) and reported "no server configured". The
+     key is still the answer when there are no profiles at all. */
   function sourceType() {
-    return Store.get(KEY_SOURCE, 'xtream');
+    var p = activeProfile();
+    if (p) return p.type === 'm3u' ? 'm3u' : 'xtream';
+    return Store.get(KEY_SOURCE, 'xtream') === 'm3u' ? 'm3u' : 'xtream';
   }
 
   /* ── The active config ────────────────────────────────────────────────────
@@ -102,8 +111,10 @@ window.Config = function () {
       if (p.type === 'm3u') {
         return {
           type: 'm3u',
-          playlist_url: p.playlist_url || '',
-          profileId: p.id
+          playlist_url: String(p.playlist_url || '').trim(),
+          profileId: p.id,
+          epg_url: p.epg_url || '',
+          epg_match: p.epg_match || 'tvg-id'
         };
       }
       var resolved = Store.get(KEY_RESOLVED, null);
@@ -123,11 +134,13 @@ window.Config = function () {
       }
       return {
         type: 'xtream',
-        server_url: ok && resolved || (p.server_urls || [])[0] || '',
+        server_url: ok && resolved || urls[0] || '',
         server_urls: urls,
         username: p.username || '',
         password: p.password || '',
-        profileId: p.id
+        profileId: p.id,
+        epg_url: p.epg_url || '',
+        epg_match: p.epg_match || 'tvg-id'
       };
     }
     var legacy = Store.get('iptv_custom_config', null);
@@ -159,8 +172,21 @@ window.Config = function () {
   }
 
   /* ── Xtream URL building ──────────────────────────────────────────────── */
+
+  /* What people actually type into a server field: "myhost.tv:8080" with no
+     scheme, a trailing slash, or the whole API URL pasted from a browser. A
+     URL with no scheme is RELATIVE, so it resolved against the app's own
+     file:// location and every request failed with "could not reach any
+     server" for a server that was fine. Providers hand these out as http. */
+  function normaliseServerUrl(u) {
+    u = String(u === null || u === undefined ? '' : u).trim();
+    if (!u) return '';
+    u = u.replace(/\/player_api\.php.*$/i, '').replace(/\/+$/, '');
+    if (!/^[a-z][a-z0-9+.\-]*:\/\//i.test(u)) u = 'http://' + u.replace(/^\/+/, '');
+    return u;
+  }
   function base(cfg) {
-    return String(cfg && cfg.server_url || '').replace(/\/+$/, '');
+    return normaliseServerUrl(cfg && cfg.server_url);
   }
   function auth(cfg) {
     return 'username=' + encodeURIComponent(cfg.username) + '&password=' + encodeURIComponent(cfg.password);
@@ -201,7 +227,7 @@ window.Config = function () {
     var entered = cfg.server_urls && cfg.server_urls.length ? cfg.server_urls : cfg.server_url ? [cfg.server_url] : [];
     var out = [];
     for (var i = 0; i < entered.length; i++) {
-      var u = String(entered[i] || '').replace(/\/+$/, '');
+      var u = normaliseServerUrl(entered[i]);
       if (!u || out.indexOf(u) !== -1) continue;
       out.push(u);
       if (/^https:/i.test(u)) {
@@ -226,6 +252,7 @@ window.Config = function () {
     resolve: resolve,
     scope: scope,
     hash: hash,
+    normaliseServerUrl: normaliseServerUrl,
     base: base,
     auth: auth,
     apiUrl: apiUrl,

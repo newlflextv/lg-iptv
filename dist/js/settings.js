@@ -14,10 +14,10 @@
       return fallback;
     }
   }
+  /* Through Store, so a store filled to the quota by caches makes room for
+     the profile list instead of silently dropping the edit. */
   function save(key, val) {
-    try {
-      localStorage.setItem(key, JSON.stringify(val));
-    } catch (e) {}
+    Store.set(key, val);
   }
 
   /* ── Status helper ─────────────────────────────────────────────────────── */
@@ -91,23 +91,27 @@
   /* Changing the active profile invalidates the Live TV channel cache, which
      is stored under GLOBAL keys rather than per-profile ones — so whatever is
      in there belongs to the profile that just stopped being active.
-       Done here rather than at each call site because there are three ways the
+      Done here rather than at each call site because there are three ways the
      active profile changes (saving/connecting a profile, applying a remote
      config, and deleting the active one so the next takes over) and only the
      first two cleared it. Deleting a profile left the previous account's
      channel list on screen under the new account's credentials until the
      background refresh landed.
-       The EPG and VOD caches need no clearing any more: they are keyed by
+      The EPG and VOD caches need no clearing any more: they are keyed by
      Config.scope(), so another profile's entries simply aren't found. */
   function setActiveId(id) {
     var changed = String(getActiveId() || '') !== String(id || '');
     save('iptv_active_profile', id);
+    /* Keep the legacy source-type key in step with the profile for
+       anything that still reads it. Config.sourceType() goes by the
+       profile itself, so this is belt and braces. */
+    var p = profiles.find(function (x) {
+      return x.id === id;
+    });
+    if (p) save('iptv_source_type', p.type === 'm3u' ? 'm3u' : 'xtream');
     if (!changed) return;
-    try {
-      localStorage.removeItem('iptv_ch_v2');
-      localStorage.removeItem('iptv_cat_v2');
-      localStorage.removeItem('iptv_m3u_v1');
-    } catch (e) {}
+    Store.remove('iptv_ch_v2');
+    Store.remove('iptv_cat_v2');
   }
 
   /* ── State ─────────────────────────────────────────────────────────────── */
@@ -259,9 +263,13 @@
       list.appendChild(row);
     });
   }
+
+  /* Normalised as they are read, so "myhost.tv:8080" is saved (and tried)
+     as http://myhost.tv:8080 rather than as a relative path that can only
+     fail — see Config.normaliseServerUrl(). */
   function getUrlsFromList() {
     return Array.from(document.querySelectorAll('#url-list .url-row input')).map(function (el) {
-      return el.value.trim().replace(/\/+$/, '');
+      return Config.normaliseServerUrl(el.value);
     }).filter(function (v) {
       return v !== '';
     });
@@ -378,13 +386,12 @@
       saveProfiles(profiles);
       activeId = profile.id;
       setActiveId(activeId);
-      save('iptv_source_type', 'm3u');
       save('iptv_m3u_config', {
         playlist_url: playlistUrl
       });
-      try {
-        localStorage.removeItem('iptv_m3u_v1');
-      } catch (e) {}
+      /* Saving is the user asking for a fresh look at the playlist. */
+      Store.remove('iptv_m3u_v1');
+      Store.removeByPrefix('iptv_m3u_v2:');
       renderProfileList();
       setStatus('profile-status', 'Saved — returning…', 'ok');
       setTimeout(function () {
@@ -423,14 +430,9 @@
     function connectSuccess(url) {
       activeId = profile.id;
       setActiveId(activeId);
-      save('iptv_source_type', 'xtream');
       save('iptv_active_resolved_url', url);
-      try {
-        localStorage.removeItem('iptv_ch_v2');
-      } catch (e) {}
-      try {
-        localStorage.removeItem('iptv_cat_v2');
-      } catch (e) {}
+      Store.remove('iptv_ch_v2');
+      Store.remove('iptv_cat_v2');
       renderProfileList();
       setStatus('profile-status', 'Connected — returning…', 'ok');
       setTimeout(function () {
@@ -450,13 +452,8 @@
     /* For each https URL, also try http on the same host/port. Some servers
        use a cert/TLS version the TV's browser rejects (even though a native
        app accepts it) — http sidesteps that. https is always tried first. */
-    var tryList = [];
-    urls.forEach(function (u) {
-      tryList.push(u);
-      if (/^https:/i.test(u)) {
-        var alt = u.replace(/^https:/i, 'http:');
-        if (tryList.indexOf(alt) === -1) tryList.push(alt);
-      }
+    var tryList = Config.candidateUrls({
+      server_urls: urls
     });
     (function tryUrls(index) {
       if (index >= tryList.length) {
@@ -466,16 +463,13 @@
       var url = tryList[index];
       setStatus('profile-status', 'Trying ' + (index + 1) + '/' + tryList.length + '…', '');
       var loginUrl = url + '/player_api.php?username=' + encodeURIComponent(username) + '&password=' + encodeURIComponent(password);
-      var ctrl = new AbortController();
-      var tid = setTimeout(function () {
-        ctrl.abort();
-      }, 12000);
-      fetch(loginUrl, {
-        signal: ctrl.signal
-      }).then(function (r) {
-        clearTimeout(tid);
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
+      /* Net's timeout holds on every webOS version. The bare fetch +
+         AbortController this used never timed out on webOS 4/5 (the
+         controller is a stub there), so a URL that accepted the
+         connection and never answered stalled on "Trying 1/2…" for good
+         and the working URL after it was never reached. */
+      Net.json(loginUrl, {
+        timeout: 12000
       }).then(function (data) {
         var ui = data && data.user_info;
         // Explicit failed login → server is fine, credentials are wrong.
@@ -505,7 +499,6 @@
         }
         tryUrls(index + 1);
       }).catch(function () {
-        clearTimeout(tid);
         tryUrls(index + 1);
       });
     })(0);
@@ -595,7 +588,7 @@
      subtitle menu instead — both are judged against what is on screen, and a
      delay picked blind in Settings is a guess. player/engine.js reads all of
      them when it starts, so a change here applies to the next stream.
-       Written raw, not JSON: the player reads them with a plain getItem, and
+      Written raw, not JSON: the player reads them with a plain getItem, and
      JSON-quoting would make every stored value fail its comparison. */
   (function populateSubtitleAppearance() {
     var pairs = [['cfg-subs-size', 'vod_subs_size', 'md', 'Text size'], ['cfg-subs-style', 'vod_sub_style', 'shadow', 'Style'], ['cfg-subs-colour', 'vod_sub_colour', 'white', 'Colour']];
@@ -1194,19 +1187,20 @@
     }, 1500);
   }
 
-  /* ── Cache panel ───────────────────────────────────────────────────────── */
+  /* ── Cache panel ─────────────────────────────────────────────────────────
+     Both buttons used to miss most of what they named. The guide cache has
+     been stored per profile ("iptv_epg_v2:<profile>") for a while, so
+     removing the bare "iptv_epg_v2" key cleared nothing at all; and the
+     channel button left the M3U playlist, catch-up and VOD caches in place.
+     Store knows every cache family, so it does the clearing. */
   document.getElementById('cfg-clear-cache-btn').addEventListener('click', function () {
-    try {
-      localStorage.removeItem('iptv_ch_v2');
-      localStorage.removeItem('iptv_cat_v2');
-    } catch (e) {}
-    setStatus('cfg-clear-ch-status', 'Channel cache cleared.', 'ok', 3000);
+    var n = Store.clearCaches();
+    setStatus('cfg-clear-ch-status', n ? 'Cleared ' + n + ' cached list' + (n === 1 ? '' : 's') + '.' : 'Nothing was cached.', 'ok', 3000);
+    renderDiagnostics();
   });
   document.getElementById('cfg-clear-epg-btn').addEventListener('click', function () {
-    try {
-      localStorage.removeItem('iptv_epg_v2');
-      localStorage.removeItem('iptv_xmltv_cache');
-    } catch (e) {}
+    Store.removeByPrefix('iptv_epg_v2');
+    Store.remove('iptv_xmltv_cache');
     setStatus('cfg-clear-epg-status', 'EPG cache cleared.', 'ok', 3000);
   });
 
@@ -1217,24 +1211,17 @@
   var _localVer = null,
     _pendingIpk = null;
   function updFetch(url) {
-    var ctrl = new AbortController();
-    var tid = setTimeout(function () {
-      ctrl.abort();
-    }, 12000);
-    return fetch(url, {
-      signal: ctrl.signal,
+    return Net.json(url, {
+      timeout: 12000,
       cache: 'no-store'
-    }).then(function (r) {
-      clearTimeout(tid);
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    }).catch(function (e) {
-      clearTimeout(tid);
-      throw e;
     });
   }
+  /* appinfo.json is a file in the app package, and native fetch refuses
+     file:// URLs outright — so on every webOS with native fetch the version
+     read as "unknown" and "Check for updates" always failed before it had
+     asked GitHub anything. Net.local reads it with XHR. */
   function updLocalVersion() {
-    return updFetch('../appinfo.json').then(function (d) {
+    return Net.localJSON('../appinfo.json').then(function (d) {
       return d.version;
     });
   }
@@ -1286,35 +1273,68 @@
       setStatus('upd-status', 'Update check failed — check your connection.', 'err');
     });
   });
+
+  /* The install request goes straight to the platform's service bus.
+     `webOS.service` only exists when LG's webOSTV.js is loaded, which this
+     app never does, so the old check always answered "isn't available" —
+     and its URI ended in /dev/install with method "install" appended,
+     which would have addressed a method that doesn't exist even if it had
+     run. PalmServiceBridge is what webOSTV.js uses underneath. */
+  function lunaSubscribe(uri, params, onMessage) {
+    if (typeof PalmServiceBridge === 'undefined') return false;
+    var bridge = new PalmServiceBridge();
+    bridge.onservicecallback = function (raw) {
+      var msg;
+      try {
+        msg = JSON.parse(raw);
+      } catch (e) {
+        msg = {
+          returnValue: false,
+          errorText: String(raw)
+        };
+      }
+      onMessage(msg, bridge);
+    };
+    bridge.call(uri, JSON.stringify(params));
+    return bridge;
+  }
   document.getElementById('upd-install-btn').addEventListener('click', function () {
     if (!_pendingIpk) return;
-    if (typeof webOS === 'undefined' || !webOS.service) {
-      setStatus('upd-progress', 'Install service isn’t available on this device.', 'err');
+    var done = false;
+    function finish(ok, text) {
+      if (done) return;
+      done = true;
+      setStatus('upd-progress', text, ok ? 'ok' : 'err');
+      if (ok) setTimeout(function () {
+        Dom.exitApp();
+      }, 2000);
+    }
+    var bridge = lunaSubscribe('luna://com.webos.appInstallService/dev/install', {
+      id: UPD_APP_ID,
+      ipkUrl: _pendingIpk,
+      subscribe: true
+    }, function (msg) {
+      if (msg.returnValue === false) {
+        finish(false, 'Install failed: ' + (msg.errorText || msg.errorCode || 'unknown error'));
+        return;
+      }
+      var state = String(msg.details && (msg.details.state || msg.details.status) || msg.state || '').toLowerCase();
+      if (/fail|error|cancel/.test(state)) {
+        finish(false, 'Install failed: ' + (msg.details && (msg.details.errorText || msg.details.reason) || state));
+      } else if (state === 'installed') {
+        finish(true, 'Installed — restarting…');
+      } else if (state) {
+        setStatus('upd-progress', 'Installing… (' + state + ')', '');
+      }
+    });
+    if (!bridge) {
+      setStatus('upd-progress', 'Install service isn’t available on this device — install the new version with Dev Manager or Homebrew Channel.', 'err');
       return;
     }
     setStatus('upd-progress', 'Installing… the app will restart when done.', '');
-    webOS.service.request('luna://com.webos.appInstallService/dev/install', {
-      method: 'install',
-      parameters: {
-        id: UPD_APP_ID,
-        ipkUrl: _pendingIpk
-      },
-      onSuccess: function onSuccess() {
-        setStatus('upd-progress', 'Installed — restarting…', 'ok');
-        setTimeout(function () {
-          try {
-            webOS.platformBack();
-          } catch (e) {}
-          try {
-            window.close();
-          } catch (e) {}
-        }, 2000);
-      },
-      onFailure: function onFailure(err) {
-        var msg = err && (err.errorText || err.errorCode);
-        setStatus('upd-progress', 'Install failed: ' + (msg ? msg : 'unknown error'), 'err');
-      }
-    });
+    setTimeout(function () {
+      finish(false, 'No answer from the TV’s installer — install the new version with Dev Manager or Homebrew Channel.');
+    }, 180000);
   });
 
   /* ── Back navigation ───────────────────────────────────────────────────── */
@@ -1322,8 +1342,8 @@
     window.tvGoBack = function (backUrl) {
       if (backUrl) {
         window.location.href = backUrl;
-      } else if (typeof webOS !== 'undefined') {
-        webOS.platformBack();
+      } else {
+        Dom.exitApp();
       }
     };
   }
@@ -1697,7 +1717,7 @@
     }
   }
   window.addEventListener('keydown', function (e) {
-    var kc = e.keyCode || e.which;
+    var kc = Dom.keyCode(e); // also maps remotes that send only a named key
     if (isInputFocused()) {
       var isArrow = kc === KEY.UP || kc === KEY.DOWN || kc === KEY.LEFT || kc === KEY.RIGHT;
       if (isArrow) {

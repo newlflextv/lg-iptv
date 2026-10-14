@@ -33,13 +33,11 @@ function _navigate(id) {
 }
 
 function _handleKey(e) {
-    const kc = e.keyCode || e.which;
+    const kc = Dom.keyCode(e);
 
     if (kc === 461) { // Back (webOS) — homepage is the root, so exit the app
         e.preventDefault();
-        // tvGoBack lives in dpad.js/settings.js which aren't loaded here, so
-        // call the platform directly with a guard.
-        if (typeof webOS !== "undefined" && webOS.platformBack) webOS.platformBack();
+        Dom.exitApp();
         return;
     }
     if (kc === 13) { // ENTER

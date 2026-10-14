@@ -114,6 +114,12 @@ body.livetv-fs #pip-wrap {
     width: 100%; height: 100%; z-index: 9999;
     border: none; border-radius: 0;
 }
+/* On engines without flex gap, the generated fallback (html.no-flex-gap — see
+   tools/build-css.js) spaces #pip-wrap off #preview-info with a margin. Pinned
+   to the viewport edges, that margin would push the picture off the right of
+   the screen. One more element in the selector than the generated rule, so
+   this wins regardless of stylesheet order. */
+html body.livetv-fs #pip-wrap { margin: 0; }
 
 #player { width: 100%; height: 100%; display: block; object-fit: contain; }
 

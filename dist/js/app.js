@@ -34,8 +34,10 @@ function _asyncToGenerator(n) { return function () { var t = this, e = arguments
 
 // ── Source type ───────────────────────────────────────────────────────────────
 
+/* From the active profile — see Config.sourceType() for why not from the
+   separate iptv_source_type key. */
 function getSourceType() {
-  return load("iptv_source_type", "xtream");
+  return Config.sourceType();
 }
 function initApp() {
   return _initApp.apply(this, arguments);
@@ -76,7 +78,7 @@ function _initAppM3U(_x) {
 }
 function _initAppM3U2() {
   _initAppM3U2 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee2(setStatus) {
-    var m3uCfg, cached, _yield$m3uGetChannels, channels, categories, _t, _t2;
+    var m3uCfg, url, cached, parsed, _t, _t2;
     return _regenerator().w(function (_context2) {
       while (1) switch (_context2.p = _context2.n) {
         case 0:
@@ -94,22 +96,24 @@ function _initAppM3U2() {
           return _context2.a(2);
         case 3:
           // Try disk cache first
-          cached = m3uLoadCache();
+          url = m3uCfg.playlist_url;
+          cached = m3uLoadCache(url);
           if (!cached) {
             _context2.n = 4;
             break;
           }
           allChannels = cached.channels;
           setStatus("".concat(allChannels.length, " channels (cached)"));
-          _bootUI(cached.categories);
-          // Refresh in background
-          m3uFetchPlaylist(m3uCfg.playlist_url).then(function (_ref) {
-            var channels = _ref.channels,
-              categories = _ref.categories;
-            allChannels = channels;
+          _bootUI(cached.categories, cached.epgUrl);
+          // Refresh in background. An empty or failed refresh keeps the cached
+          // list on screen rather than wiping it — same rule as Xtream below.
+          m3uFetchPlaylist(url).then(function (parsed) {
+            if (!parsed.channels.length) return;
+            allChannels = parsed.channels;
             setStatus("".concat(allChannels.length, " channels"));
-            m3uSaveCache(channels, categories);
-            renderCategories(categories);
+            m3uSaveCache(url, parsed);
+            renderCategories(parsed.categories);
+            updateSidebarActive();
             applyFilters();
           }).catch(function () {});
           return _context2.a(2);
@@ -119,20 +123,18 @@ function _initAppM3U2() {
           _context2.n = 5;
           return m3uGetChannelsAndCategories(m3uCfg);
         case 5:
-          _yield$m3uGetChannels = _context2.v;
-          channels = _yield$m3uGetChannels.channels;
-          categories = _yield$m3uGetChannels.categories;
-          if (channels.length) {
+          parsed = _context2.v;
+          if (parsed.channels.length) {
             _context2.n = 6;
             break;
           }
           setStatus("ERR: 0 channels in playlist", true);
           return _context2.a(2);
         case 6:
-          allChannels = channels;
+          allChannels = parsed.channels;
           setStatus("".concat(allChannels.length, " channels"));
-          m3uSaveCache(channels, categories);
-          _bootUI(categories);
+          m3uSaveCache(url, parsed);
+          _bootUI(parsed.categories, parsed.epgUrl);
           _context2.n = 8;
           break;
         case 7:
@@ -203,14 +205,27 @@ function _initAppXtream2() {
             allChannels = fresh;
             setStatus("".concat(allChannels.length, " channels"));
             saveChannelCache(fresh, categories);
+            if (xmltvCache && xmltvCache.programmes) mergeXMLTVIntoEpgCache();
+            _keepScrollOnApply = true; // a refresh must not throw the user back to row 1
             applyFilters();
           }).catch(function () {});
           xtreamGetCategories(cfg).then(function (freshCat) {
             if (!freshCat.length) return;
+            var sig = function sig(list) {
+              return list.map(function (c) {
+                return c.category_id + ":" + c.category_name;
+              }).join("|");
+            };
+            var changed = sig(freshCat) !== sig(categories);
             categories = freshCat;
-            saveChannelCache(allChannels, freshCat);
+            /* Only the category list is new here, so only it is written. This
+               used to re-save the entire channel list as well — serialising
+               several MB a second time on every launch for nothing. */
+            Store.cacheSet(CAT_CACHE_KEY, freshCat);
+            if (!changed) return; // identical: leave the sidebar (and the focus ring in it) alone
             renderCategories(freshCat);
             updateSidebarActive();
+            if (tvFocusZone === "sidebar-cats") tvFocusSidebarItem(tvSidebarIndex);
           }).catch(function () {});
           return _context3.a(2);
         case 6:
@@ -278,12 +293,11 @@ function _initAppXtream2() {
   }));
   return _initAppXtream2.apply(this, arguments);
 }
-function _bootUI(categories) {
+function _bootUI(categories, playlistEpgUrl) {
   renderCategories(categories);
   setupSearch();
   setupPip();
   setupTimelineNav();
-  if (xmltvCache && xmltvCache.programmes) mergeXMLTVIntoEpgCache();
   activeCategory = Favourites.isEmpty() ? "all" : "favs";
   activeFavGroup = "all";
   if (activeCategory === "favs") {
@@ -295,6 +309,12 @@ function _bootUI(categories) {
   applyFilters();
   tvRowIndex = 0;
   setTVZone("channel-list");
+
+  // After the list is painted: a user-supplied guide is a large download
+  // and must not hold up the first frame of channels.
+  setTimeout(function () {
+    return loadXMLTV(playlistEpgUrl);
+  }, 500);
 }
 
 // ── Channel selection ─────────────────────────────────────────────────────────
@@ -369,12 +389,18 @@ function _selectChannel() {
           showOSD();
           return _context4.a(2);
         case 9:
-          _findNowNext2 = _findNowNext(listings), cur = _findNowNext2.cur, next = _findNowNext2.next;
-          setEPG("now", xtreamDecodeEPG(cur.title), formatTimeRange(cur), xtreamDecodeEPG(cur.description));
-          document.getElementById("epg-bar-fill").style.width = calcProgress(cur) + "%";
-          if (next) setEPG("next", xtreamDecodeEPG(next.title), formatTimeRange(next), "");
-          showOSD();
+          if (!(currentChannel !== ch)) {
+            _context4.n = 10;
+            break;
+          }
+          return _context4.a(2);
         case 10:
+          _findNowNext2 = _findNowNext(listings), cur = _findNowNext2.cur, next = _findNowNext2.next;
+          setEPG("now", epgTitle(cur), formatTimeRange(cur), epgDesc(cur));
+          document.getElementById("epg-bar-fill").style.width = calcProgress(cur) + "%";
+          if (next) setEPG("next", epgTitle(next), formatTimeRange(next), "");
+          showOSD();
+        case 11:
           return _context4.a(2);
       }
     }, _callee4, null, [[1, 6]]);
@@ -417,20 +443,17 @@ function channelStep(delta) {
 (function boot() {
   // Publish the active Xtream profile as IPTV_CONFIG, which is what
   // data/xtream.js reads. M3U profiles take their own path via
-  // iptv_m3u_config / iptv_source_type.
+  // m3uLoadConfig(), which reads the active profile too.
   try {
     var active = Config.resolve();
     if (active && active.type !== "m3u" && active.server_url) window.IPTV_CONFIG = active;
   } catch (_) {}
-  loadXMLTVFromCache();
+
+  // XMLTV loads from _bootUI once the channel list exists — matching a
+  // guide against no channels does nothing.
   measureRowHeight();
   initVirtualScroll();
   initTVNavigation();
   if (typeof tvSetBackUrl === "function") tvSetBackUrl("../index.html");
   initApp();
-  if (load("iptv_custom_epg_url", "")) {
-    setTimeout(function () {
-      return mergeXMLTVIntoEpgCache();
-    }, 2000);
-  }
 })();

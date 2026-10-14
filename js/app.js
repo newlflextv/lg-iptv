@@ -22,8 +22,10 @@
 
 // ── Source type ───────────────────────────────────────────────────────────────
 
+/* From the active profile — see Config.sourceType() for why not from the
+   separate iptv_source_type key. */
 function getSourceType() {
-    return load("iptv_source_type", "xtream");
+    return Config.sourceType();
 }
 
 async function initApp() {
@@ -48,17 +50,21 @@ async function _initAppM3U(setStatus) {
     catch (err) { setStatus("ERR: " + err.message, true); return; }
 
     // Try disk cache first
-    const cached = m3uLoadCache();
+    const url    = m3uCfg.playlist_url;
+    const cached = m3uLoadCache(url);
     if (cached) {
         allChannels = cached.channels;
         setStatus(`${allChannels.length} channels (cached)`);
-        _bootUI(cached.categories);
-        // Refresh in background
-        m3uFetchPlaylist(m3uCfg.playlist_url).then(({ channels, categories }) => {
-            allChannels = channels;
+        _bootUI(cached.categories, cached.epgUrl);
+        // Refresh in background. An empty or failed refresh keeps the cached
+        // list on screen rather than wiping it — same rule as Xtream below.
+        m3uFetchPlaylist(url).then(parsed => {
+            if (!parsed.channels.length) return;
+            allChannels = parsed.channels;
             setStatus(`${allChannels.length} channels`);
-            m3uSaveCache(channels, categories);
-            renderCategories(categories);
+            m3uSaveCache(url, parsed);
+            renderCategories(parsed.categories);
+            updateSidebarActive();
             applyFilters();
         }).catch(() => {});
         return;
@@ -66,12 +72,12 @@ async function _initAppM3U(setStatus) {
 
     try {
         setStatus("Loading playlist…");
-        const { channels, categories } = await m3uGetChannelsAndCategories(m3uCfg);
-        if (!channels.length) { setStatus("ERR: 0 channels in playlist", true); return; }
-        allChannels = channels;
+        const parsed = await m3uGetChannelsAndCategories(m3uCfg);
+        if (!parsed.channels.length) { setStatus("ERR: 0 channels in playlist", true); return; }
+        allChannels = parsed.channels;
         setStatus(`${allChannels.length} channels`);
-        m3uSaveCache(channels, categories);
-        _bootUI(categories);
+        m3uSaveCache(url, parsed);
+        _bootUI(parsed.categories, parsed.epgUrl);
     } catch (err) { setStatus("ERR: " + err.message, true); }
 }
 
@@ -107,14 +113,23 @@ async function _initAppXtream(setStatus) {
             allChannels = fresh;
             setStatus(`${allChannels.length} channels`);
             saveChannelCache(fresh, categories);
+            if (xmltvCache && xmltvCache.programmes) mergeXMLTVIntoEpgCache();
+            _keepScrollOnApply = true;   // a refresh must not throw the user back to row 1
             applyFilters();
         }).catch(() => {});
         xtreamGetCategories(cfg).then(freshCat => {
             if (!freshCat.length) return;
+            const sig = list => list.map(c => c.category_id + ":" + c.category_name).join("|");
+            const changed = sig(freshCat) !== sig(categories);
             categories = freshCat;
-            saveChannelCache(allChannels, freshCat);
+            /* Only the category list is new here, so only it is written. This
+               used to re-save the entire channel list as well — serialising
+               several MB a second time on every launch for nothing. */
+            Store.cacheSet(CAT_CACHE_KEY, freshCat);
+            if (!changed) return;      // identical: leave the sidebar (and the focus ring in it) alone
             renderCategories(freshCat);
             updateSidebarActive();
+            if (tvFocusZone === "sidebar-cats") tvFocusSidebarItem(tvSidebarIndex);
         }).catch(() => {});
         return;
     }
@@ -143,13 +158,12 @@ async function _initAppXtream(setStatus) {
     } catch (err) { setStatus("ERR: " + err.message, true); }
 }
 
-function _bootUI(categories) {
+function _bootUI(categories, playlistEpgUrl) {
     renderCategories(categories);
     setupSearch();
     setupPip();
     setupTimelineNav();
 
-    if (xmltvCache && xmltvCache.programmes) mergeXMLTVIntoEpgCache();
     activeCategory = Favourites.isEmpty() ? "all" : "favs";
     activeFavGroup = "all";
     if (activeCategory === "favs") {
@@ -162,6 +176,10 @@ function _bootUI(categories) {
 
     tvRowIndex = 0;
     setTVZone("channel-list");
+
+    // After the list is painted: a user-supplied guide is a large download
+    // and must not hold up the first frame of channels.
+    setTimeout(() => loadXMLTV(playlistEpgUrl), 500);
 }
 
 
@@ -198,10 +216,14 @@ async function selectChannel(ch) {
     }
     if (!listings?.length) { setEPG("now", "No EPG data", "", ""); showOSD(); return; }
 
+    // The user may have moved on while the guide was loading; painting this
+    // channel's programme over the next one's would put the wrong title up.
+    if (currentChannel !== ch) return;
+
     const { cur, next } = _findNowNext(listings);
-    setEPG("now", xtreamDecodeEPG(cur.title), formatTimeRange(cur), xtreamDecodeEPG(cur.description));
+    setEPG("now", epgTitle(cur), formatTimeRange(cur), epgDesc(cur));
     document.getElementById("epg-bar-fill").style.width = calcProgress(cur) + "%";
-    if (next) setEPG("next", xtreamDecodeEPG(next.title), formatTimeRange(next), "");
+    if (next) setEPG("next", epgTitle(next), formatTimeRange(next), "");
     showOSD();
 }
 
@@ -241,21 +263,17 @@ function channelStep(delta) {
 (function boot() {
     // Publish the active Xtream profile as IPTV_CONFIG, which is what
     // data/xtream.js reads. M3U profiles take their own path via
-    // iptv_m3u_config / iptv_source_type.
+    // m3uLoadConfig(), which reads the active profile too.
     try {
         const active = Config.resolve();
         if (active && active.type !== "m3u" && active.server_url) window.IPTV_CONFIG = active;
     } catch (_) {}
 
-    loadXMLTVFromCache();
-
+    // XMLTV loads from _bootUI once the channel list exists — matching a
+    // guide against no channels does nothing.
     measureRowHeight();
     initVirtualScroll();
     initTVNavigation();
     if (typeof tvSetBackUrl === "function") tvSetBackUrl("../index.html");
     initApp();
-
-    if (load("iptv_custom_epg_url", "")) {
-        setTimeout(() => mergeXMLTVIntoEpgCache(), 2000);
-    }
 }());

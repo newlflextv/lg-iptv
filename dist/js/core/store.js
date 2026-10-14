@@ -20,6 +20,125 @@
 window.Store = function () {
   'use strict';
 
+  /* ── Making room ───────────────────────────────────────────────────────────
+     The platform gives an app roughly 5 MB, and a large provider's channel
+     list, guide and VOD category lists can each take a good share of it.
+     Nothing used to free that space: a cache entry was only deleted when its
+     OWN key was read after expiry, so VOD lists for categories nobody
+     reopened sat there for good. Once the store was full every write failed
+     silently — the channel list stopped caching (Live TV fetched it from
+     scratch on every launch), and the play handover, resume positions and
+     profile edits started being dropped too.
+      Now a write that hits the quota evicts cache entries and retries. Caches
+     go in order of how cheap they are to rebuild — guide data first, the
+     live channel list last — and oldest first within each family. User data
+     (profiles, favourites, progress) is never a candidate. */
+  var CACHE_FAMILIES = [['iptv_epg_v2', 'iptv_xmltv_cache'],
+  // refetches in seconds
+  ['vod_content_', 'cu_channels_', 'cu_cats_'],
+  // one category / one page
+  ['vod_cats_'], ['iptv_m3u_v', 'iptv_ch_v2', 'iptv_cat_v2'] // the whole channel list
+  ];
+  /* Longer than any TTL in the app (XMLTV, at 24h, is the longest), so an
+     entry older than this is dead weight whatever it is. */
+  var STALE_MS = 26 * 60 * 60 * 1000;
+  function familyOf(key) {
+    for (var f = 0; f < CACHE_FAMILIES.length; f++) {
+      for (var p = 0; p < CACHE_FAMILIES[f].length; p++) {
+        if (key.indexOf(CACHE_FAMILIES[f][p]) === 0) return f;
+      }
+    }
+    return -1;
+  }
+
+  /* Every cache entry starts {"ts":<ms>, … — JSON.stringify keeps key order —
+     so the age is read off the front without parsing a multi-megabyte value. */
+  function entryTs(key) {
+    try {
+      var m = /^\{"ts":(\d+)/.exec(String(localStorage.getItem(key) || '').slice(0, 32));
+      return m ? +m[1] : 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  /* A cache write may only displace caches that are as cheap or cheaper to
+     rebuild than itself (plus anything stale) — otherwise one oversized guide
+     that could never fit would wipe the channel list on its way to failing.
+     User data may displace any cache. */
+  function evictionOrder(except) {
+    var all = keys(),
+      list = [];
+    var own = familyOf(except);
+    var stale = Date.now() - STALE_MS;
+    for (var i = 0; i < all.length; i++) {
+      var k = all[i];
+      if (!k || k === except) continue;
+      var fam = familyOf(k);
+      if (fam === -1) continue;
+      var ts = entryTs(k);
+      if (own !== -1 && fam > own && ts >= stale) continue;
+      list.push({
+        key: k,
+        fam: fam,
+        ts: ts
+      });
+    }
+    list.sort(function (a, b) {
+      var sa = a.ts < stale ? 0 : 1,
+        sb = b.ts < stale ? 0 : 1; // stale first
+      if (sa !== sb) return sa - sb;
+      if (a.fam !== b.fam) return a.fam - b.fam;
+      return a.ts - b.ts;
+    });
+    return list;
+  }
+  function write(key, str) {
+    try {
+      localStorage.setItem(key, str);
+      return true;
+    } catch (e) {}
+    var victims = evictionOrder(key);
+    for (var i = 0; i < victims.length; i++) {
+      remove(victims[i].key);
+      try {
+        localStorage.setItem(key, str);
+        return true;
+      } catch (e2) {}
+    }
+    return false;
+  }
+
+  /* Drops cache entries past any TTL. Run once per launch from the homepage
+     (prewarm.js), so space is reclaimed before anything needs it rather than
+     only when a write has already failed. */
+  function sweep() {
+    var stale = Date.now() - STALE_MS,
+      n = 0,
+      all = keys();
+    for (var i = 0; i < all.length; i++) {
+      if (!all[i] || familyOf(all[i]) === -1) continue;
+      if (entryTs(all[i]) < stale) {
+        remove(all[i]);
+        n++;
+      }
+    }
+    return n;
+  }
+
+  /* Every cache the app keeps, for Settings → "Clear cache". */
+  function clearCaches() {
+    var all = keys(),
+      n = 0;
+    for (var i = 0; i < all.length; i++) {
+      if (all[i] && familyOf(all[i]) !== -1) {
+        remove(all[i]);
+        n++;
+      }
+    }
+    return n;
+  }
+
   /* ── Bare strings ─────────────────────────────────────────────────────── */
   function getRaw(key, fallback) {
     try {
@@ -30,12 +149,7 @@ window.Store = function () {
     }
   }
   function setRaw(key, value) {
-    try {
-      localStorage.setItem(key, String(value));
-      return true;
-    } catch (e) {
-      return false;
-    }
+    return write(key, String(value));
   }
 
   /* ── JSON values ──────────────────────────────────────────────────────── */
@@ -48,12 +162,13 @@ window.Store = function () {
     }
   }
   function set(key, value) {
+    var str;
     try {
-      localStorage.setItem(key, JSON.stringify(value));
-      return true;
+      str = JSON.stringify(value);
     } catch (e) {
       return false;
     }
+    return write(key, str);
   }
   function remove(key) {
     try {
@@ -141,6 +256,8 @@ window.Store = function () {
     DEFAULT_TTL: DEFAULT_TTL,
     keys: keys,
     bytesUsed: bytesUsed,
-    removeByPrefix: removeByPrefix
+    removeByPrefix: removeByPrefix,
+    sweep: sweep,
+    clearCaches: clearCaches
   };
 }();

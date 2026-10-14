@@ -16,6 +16,7 @@
    Local aliases for the core modules. They read better at the density this
    file uses them, and they keep the call sites short enough to stay on one
    line, which most of the rendering code depends on for legibility. */
+function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) { return typeof o; } : function (o) { return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o; }, _typeof(o); }
 var cfg = Config.resolve();
 
 /* The VOD caches used to be keyed by the server URL, which two accounts on one
@@ -51,6 +52,41 @@ function fetchJSON(url) {
 }
 function fetchCached(key, url) {
   return Net.cachedJSON(key, url);
+}
+
+/* ── Category lists, slimmed before caching ──────────────────────────────
+   Every rail caches its category's full list, and a panel's VOD objects
+   carry two dozen fields — trailers, TMDB ids, backdrops, timestamps, flags —
+   of which the cards and the detail view read a handful. Cached whole, a few
+   dozen categories filled the ~5 MB store on their own, and from then on
+   nothing else could be written: not the channel list, not the play
+   handover, not resume positions. Only what is read is kept now, and the
+   long free-text fields are capped. */
+var VOD_KEEP = ['name', 'title', 'stream_id', 'series_id', 'stream_icon', 'cover', 'cover_big', 'icon', 'container_extension', 'category_id', 'rating', 'rating_5based', 'year', 'releaseDate', 'releasedate', 'genre', 'duration', 'director'];
+function slimVodItem(m) {
+  var out = {};
+  if (!m || _typeof(m) !== 'object') return out;
+  for (var i = 0; i < VOD_KEEP.length; i++) {
+    var v = m[VOD_KEEP[i]];
+    if (v !== undefined && v !== null && v !== '') out[VOD_KEEP[i]] = v;
+  }
+  var plot = m.plot || m.description;
+  if (plot) out.plot = String(plot).slice(0, 600);
+  if (m.cast) out.cast = String(m.cast).slice(0, 300);
+  if (!out.stream_icon && !out.cover && !out.cover_big) {
+    var bd = Array.isArray(m.backdrop_path) ? m.backdrop_path[0] : m.backdrop_path;
+    if (bd) out.cover = bd;
+  }
+  return out;
+}
+function fetchCachedList(key, url) {
+  var hit = Store.cacheGet(key);
+  if (hit) return Promise.resolve(hit);
+  return fetchJSON(url).then(function (data) {
+    var list = Array.isArray(data) ? data.map(slimVodItem) : [];
+    Store.cacheSet(key, list);
+    return list;
+  });
 }
 function escHtml(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

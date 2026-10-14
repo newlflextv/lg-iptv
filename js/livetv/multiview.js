@@ -229,6 +229,10 @@ window.Multiview = (function () {
         };
 
         player.onPlaying = function () { tileStarted(tile); };
+        /* If the TV refused to start a tile with sound, the engine starts it
+           muted and hands the decision back here on the next key press —
+           which tile is audible is the grid's call, not the tile's. */
+        player.onAutoplayUnblocked = function () { applyAudio(); };
 
         /* A tile that cannot start is the normal outcome when the TV runs out
            of decoders, and "Can't play this channel" is a misleading way to say

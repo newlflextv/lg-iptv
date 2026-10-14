@@ -66,19 +66,29 @@ Install the app
 
 ## Development
 
-Source lives in `js/`; Babel transpiles it to `dist/js/` (target: Chrome 38 —
-webOS 3.0). The pages load `dist/`, never `js/`.
+Source lives in `js/` and `assets/*.css`; the build writes `dist/js/` (Babel,
+target Chrome 38 — webOS 3.0) and `dist/css/` (`tools/build-css.js`). The pages
+load `dist/`, never the sources directly.
 
 ```bash
 npm ci
-npm run build      # babel js --out-dir dist/js, preserving the folder layout
+npm run build      # Babel js/ → dist/js, then assets/*.css → dist/css
 ```
+
+`tools/build-css.js` is what makes the stylesheets work on old TVs: every
+declaration that uses `var(--…)` gets a resolved copy in front of it (webOS 3
+has no custom properties — without this the whole UI renders black on black),
+flexbox/animation properties get `-webkit-` copies for the WebKit-based webOS
+1/2, and every flex `gap` gets a margin fallback under `html.no-flex-gap`
+(gap on flex containers needs Chromium 84; `assets/boot.js` sets the class).
+Edit `assets/*.css`, then rebuild.
 
 ### Layout
 
 | Path | What lives there |
 | --- | --- |
-| `assets/boot.js` | Blocking, in every page's `<head>`. Detects the TV's video pipeline and applies the interface scale *before first paint* — both are wrong if they happen a frame late. Not part of the Babel build. |
+| `assets/boot.js` | Blocking, in every page's `<head>`. Detects the TV's video pipeline and flex-gap support and applies the interface scale *before first paint* — all wrong if they happen a frame late. Not part of the Babel build. |
+| `assets/*.css` | Stylesheet sources. Built into `dist/css/` by `tools/build-css.js`; the pages load the built copies. |
 | `js/polyfills.js` | Feature-detected shims for webOS 3/4/5 (fetch, AbortController, `Array.from`, `Element.closest`, …). Loads first on every page. |
 | `js/core/` | `store` (all localStorage), `net` (all HTTP), `dom` (elements, focus ring, key codes), `config` (profiles + every Xtream URL). |
 | `js/data/` | Provider clients and data shaping: `xtream`, `m3u`, `subtitles`, `favourites`. |

@@ -201,6 +201,12 @@ function _xtreamGetCategories() {
 function xtreamGetEPG(_x4, _x5) {
   return _xtreamGetEPG.apply(this, arguments);
 }
+/* Xtream base64-encodes guide text, and the bytes inside are UTF-8. atob()
+   alone returns those bytes one character each, which is right for plain
+   English and wrong for everything else: "Café" came out as "CafÃ©", and
+   Arabic, Greek or Cyrillic titles came out as unreadable runs of accented
+   Latin. The escape/decodeURIComponent pair is the ES5 way to reassemble UTF-8;
+   if the bytes aren't valid UTF-8 the raw decode is kept. */
 function _xtreamGetEPG() {
   _xtreamGetEPG = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee4(cfg, streamId) {
     var data, _t5;
@@ -230,10 +236,19 @@ function _xtreamGetEPG() {
 }
 function xtreamDecodeEPG(str) {
   if (!str) return '';
+  var s = String(str);
+  var b64 = s.replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64) || b64.length % 4 === 1) return s;
+  var bin;
   try {
-    return atob(str);
+    bin = atob(b64);
   } catch (e) {
-    return str;
+    return s;
+  }
+  try {
+    return decodeURIComponent(escape(bin));
+  } catch (e) {
+    return bin;
   }
 }
 

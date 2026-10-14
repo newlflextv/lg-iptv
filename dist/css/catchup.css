@@ -1,0 +1,843 @@
+/* Generated from assets/catchup.css by tools/build-css.js — edit the source, not this file. */
+#cu-app {
+    display: -webkit-flex;
+    display: flex;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+}
+#cu-sidebar {
+    width: 26.25rem;
+    width: var(--sidebar-w);
+    min-width: 26.25rem;
+    min-width: var(--sidebar-w);
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    background: #131316;
+    background: var(--bg2);
+    border-right: 1px solid #22222a;
+    border-right: var(--border);
+    overflow: hidden;
+    z-index: 10;
+}
+#cu-sidebar-header {
+    padding: 1.5rem 1.125rem 1.125rem;
+    border-bottom: 1px solid #22222a;
+    border-bottom: var(--border);
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+}
+#cu-brand {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #e5001e;
+    color: var(--accent);
+    margin-bottom: 1.125rem;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    gap: 0.875rem;
+}
+html.no-flex-gap #cu-brand > * + * {
+    margin-left: 0.875rem;
+}
+#cu-brand span {
+    color: #f0f0f5;
+    color: var(--text);
+}
+#cu-home-btn, #cu-settings-btn {
+    width: 2.875rem;
+    height: 2.875rem;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    background: #242428;
+    background: var(--bg4);
+    border: 1px solid #22222a;
+    border: var(--border);
+    color: #80808c;
+    color: var(--text-dim);
+    cursor: pointer;
+    -webkit-transition: background 0.15s, border-color 0.15s, color 0.15s, -webkit-transform 0.15s;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
+}
+#cu-home-btn {
+    border-radius: 50%;
+}
+#cu-settings-btn {
+    border-radius: 0.625rem;
+    background: #1b1b20;
+    background: var(--bg3);
+    margin-left: auto;
+}
+#cu-home-btn svg, #cu-settings-btn svg {
+    width: 1.25rem;
+    height: 1.25rem;
+    display: block;
+}
+#cu-home-btn:hover, #cu-home-btn.tv-focus-visible,
+#cu-settings-btn:hover, #cu-settings-btn.tv-focus-visible {
+    background: #e5001e;
+    background: var(--accent);
+    border-color: #e5001e;
+    border-color: var(--accent);
+    color: #fff;
+    -webkit-transform: scale(1.08);
+    transform: scale(1.08);
+}
+#cu-home-btn.tv-focus-visible, #cu-settings-btn.tv-focus-visible {
+    box-shadow: 0 0 0 3px #b0001a;
+    box-shadow: 0 0 0 3px var(--accent-dim);
+}
+#cu-search {
+    width: 100%;
+    padding: 0.9375rem 1rem;
+    background: #1b1b20;
+    background: var(--bg3);
+    border: 1px solid #22222a;
+    border: var(--border);
+    border-radius: 0.625rem;
+    border-radius: var(--radius);
+    color: #f0f0f5;
+    color: var(--text);
+    font-size: 1.1875rem;
+    outline: none;
+}
+#cu-search:focus, #cu-search.tv-focus-visible {
+    border-color: #e5001e;
+    border-color: var(--accent);
+}
+#cu-search::placeholder {
+    color: #80808c;
+    color: var(--text-dim);
+}
+#cu-status {
+    margin-top: 0.625rem;
+    font-size: 1.0625rem;
+    color: #4a4a56;
+    color: var(--text-faint);
+}
+#cu-nav-wrap {
+    -webkit-flex: 1;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0.5rem;
+    scrollbar-width: thin;
+    scrollbar-color: #242428 transparent;
+    scrollbar-color: var(--bg4) transparent;
+}
+#cu-nav-wrap::-webkit-scrollbar {
+    width: 0.375rem;
+}
+#cu-nav-wrap::-webkit-scrollbar-thumb {
+    background: #242428;
+    background: var(--bg4);
+    border-radius: 0.25rem;
+}
+#cu-nav {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+html.no-flex-gap #cu-nav > * + * {
+    margin-top: 0.25rem;
+}
+.cu-cw-nav {
+    width: 100%;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 1rem;
+    background: #1b1b20;
+    background: var(--bg3);
+    border: 1px solid transparent;
+    border-radius: 0.5rem;
+    color: #f0f0f5;
+    color: var(--text);
+    font-size: 1.1875rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+}
+html.no-flex-gap .cu-cw-nav > * + * {
+    margin-left: 0.625rem;
+}
+.cu-cw-ico {
+    color: #e5001e;
+    color: var(--accent);
+    font-size: 1rem;
+}
+.cu-cw-nav.active {
+    background: rgba(229,0,30,0.12);
+    border-color: #b0001a;
+    border-color: var(--accent-dim);
+}
+.cu-cw-nav:hover {
+    background: #242428;
+    background: var(--bg4);
+}
+.cu-cw-nav.tv-focus-visible {
+    outline: 3px solid #e5001e;
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+}
+.cu-section {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+}
+.cu-section-hdr {
+    width: 100%;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 0.5rem;
+    color: #80808c;
+    color: var(--text-dim);
+    font-size: 1.1875rem;
+    cursor: pointer;
+    text-align: left;
+}
+html.no-flex-gap .cu-section-hdr > * + * {
+    margin-left: 0.5rem;
+}
+.cu-section-hdr:hover {
+    background: #1b1b20;
+    background: var(--bg3);
+    color: #f0f0f5;
+    color: var(--text);
+}
+.cu-section-hdr.tv-focus-visible {
+    outline: 3px solid #e5001e;
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+    color: #f0f0f5;
+    color: var(--text);
+}
+.cu-sec-chev {
+    font-size: 0.9375rem;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    -webkit-transition: -webkit-transform 0.2s ease;
+    transition: transform 0.2s ease;
+}
+.cu-section.open .cu-sec-chev {
+    -webkit-transform: rotate(180deg);
+    transform: rotate(180deg);
+}
+.cu-sec-label {
+    -webkit-flex: 1;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.cu-sec-count {
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: #4a4a56;
+    color: var(--text-faint);
+    background: #242428;
+    background: var(--bg4);
+    border-radius: 62.4375rem;
+    padding: 0.1875rem 0.5625rem;
+}
+.cu-section-list {
+    display: none;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    padding-left: 0.5rem;
+}
+.cu-section.open .cu-section-list {
+    display: -webkit-flex;
+    display: flex;
+}
+.cu-search-list {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+}
+.cu-ch-row {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    height: 4.375rem;
+    min-height: 4.375rem;
+    padding: 0 0.625rem;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: background 0.12s;
+}
+.cu-ch-row:hover {
+    background: #1b1b20;
+    background: var(--bg3);
+}
+.cu-ch-row.selected {
+    background: rgba(229,0,30,0.1);
+}
+.cu-ch-row.selected .cu-ch-name {
+    color: #e5001e;
+    color: var(--accent);
+}
+.cu-ch-row.tv-focus-visible {
+    outline: 3px solid #e5001e !important;
+    outline: 3px solid var(--accent) !important;
+    outline-offset: -3px;
+    background: #1b1b20;
+    background: var(--bg3);
+}
+.cu-ch-row.cu-row-active {
+    background: #1b1b20;
+    background: var(--bg3);
+}
+.cu-ch-logo {
+    width: 2.875rem;
+    height: 2.875rem;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    margin-right: 0.75rem;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+}
+.cu-ch-logo img {
+    width: 2.875rem;
+    height: 2.875rem;
+    object-fit: contain;
+    display: block;
+    border-radius: 0.5rem;
+}
+.cu-ch-logo-fallback {
+    width: 2.875rem;
+    height: 2.875rem;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    font-size: 1.1875rem;
+    font-weight: 700;
+    color: #e5001e;
+    color: var(--accent);
+    background: #242428;
+    background: var(--bg4);
+    border-radius: 0.5rem;
+    border: 1px solid #2e2e34;
+    border: 1px solid var(--bg5);
+}
+.cu-ch-name {
+    -webkit-flex: 1;
+    flex: 1;
+    min-width: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #f0f0f5;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cu-ch-badge {
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    margin-left: 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #80808c;
+    color: var(--text-dim);
+    background: #242428;
+    background: var(--bg4);
+    border: 1px solid #2e2e34;
+    border: 1px solid var(--bg5);
+    border-radius: 62.4375rem;
+    padding: 0.1875rem 0.5625rem;
+}
+.cu-fav-btn {
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    margin-left: 0.5rem;
+    width: 2.5rem;
+    height: 2.5rem;
+    background: none;
+    border: 1.5px solid transparent;
+    border-radius: 0.625rem;
+    color: #4a4a56;
+    color: var(--text-faint);
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    transition: color 0.13s, background 0.13s, border-color 0.13s;
+}
+.cu-fav-btn:hover {
+    color: #f5c518;
+    color: var(--gold);
+    background: rgba(197,153,10,0.12);
+}
+.cu-fav-btn.active {
+    color: #f5c518;
+    color: var(--gold);
+}
+.cu-fav-btn.tv-focus-visible {
+    color: #f5c518;
+    color: var(--gold);
+    border-color: #f5c518;
+    border-color: var(--gold);
+    background: rgba(197,153,10,0.18);
+    box-shadow: 0 0 0 2px rgba(197,153,10,0.35);
+}
+.cu-ch-empty {
+    padding: 1.875rem 0.875rem;
+    text-align: center;
+    color: #80808c;
+    color: var(--text-dim);
+    font-size: 1.125rem;
+}
+#cu-main {
+    -webkit-flex: 1;
+    flex: 1;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    overflow: hidden;
+    background: #0c0c0e;
+    background: var(--bg);
+    min-width: 0;
+}
+#cu-main-header {
+    padding: 1.75rem 2rem 1.25rem;
+    border-bottom: 1px solid #22222a;
+    border-bottom: var(--border);
+    background: #131316;
+    background: var(--bg2);
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+}
+#cu-main-title {
+    font-size: 1.875rem;
+    font-weight: 700;
+    color: #f0f0f5;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#cu-main-sub {
+    margin-top: 0.375rem;
+    font-size: 1.125rem;
+    color: #80808c;
+    color: var(--text-dim);
+}
+#cu-content {
+    -webkit-flex: 1;
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+}
+#cu-cw {
+    -webkit-flex: 1;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 1.25rem 1.5rem;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    gap: 0.75rem;
+    scrollbar-width: thin;
+    scrollbar-color: #242428 transparent;
+    scrollbar-color: var(--bg4) transparent;
+}
+html.no-flex-gap #cu-cw > * + * {
+    margin-top: 0.75rem;
+}
+#cu-cw::-webkit-scrollbar {
+    width: 0.375rem;
+}
+#cu-cw::-webkit-scrollbar-thumb {
+    background: #242428;
+    background: var(--bg4);
+    border-radius: 0.25rem;
+}
+.cu-cw-card {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.875rem 1.125rem;
+    background: #131316;
+    background: var(--bg2);
+    border: 1px solid #22222a;
+    border: var(--border);
+    border-radius: 0.75rem;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+}
+html.no-flex-gap .cu-cw-card > * + * {
+    margin-left: 1rem;
+}
+.cu-cw-card:hover {
+    background: #1b1b20;
+    background: var(--bg3);
+}
+.cu-cw-card.tv-focus-visible {
+    outline: 3px solid #e5001e !important;
+    outline: 3px solid var(--accent) !important;
+    outline-offset: 2px;
+    background: #1b1b20;
+    background: var(--bg3);
+}
+.cu-cw-card.cu-row-active {
+    background: #1b1b20;
+    background: var(--bg3);
+}
+.cu-cw-card.cu-cw-empty {
+    opacity: 0.6;
+}
+.cu-cw-logo {
+    width: 4rem;
+    height: 4rem;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    background: #242428;
+    background: var(--bg4);
+    border-radius: 0.625rem;
+    overflow: hidden;
+}
+.cu-cw-logo img {
+    width: 4rem;
+    height: 4rem;
+    object-fit: contain;
+}
+.cu-cw-body {
+    -webkit-flex: 1;
+    flex: 1;
+    min-width: 0;
+}
+.cu-cw-title {
+    font-size: 1.3125rem;
+    font-weight: 700;
+    color: #f0f0f5;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cu-cw-channel {
+    font-size: 1rem;
+    color: #80808c;
+    color: var(--text-dim);
+    margin-top: 0.1875rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cu-cw-when {
+    font-size: 1rem;
+    color: #e5001e;
+    color: var(--accent);
+    margin-top: 0.3125rem;
+}
+.cu-cw-play {
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    font-size: 1.25rem;
+    color: #e5001e;
+    color: var(--accent);
+}
+.cu-cw-unpin {
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    width: 2.75rem;
+    height: 2.75rem;
+    background: none;
+    border: 1.5px solid transparent;
+    border-radius: 0.625rem;
+    color: #f5c518;
+    color: var(--gold);
+    font-size: 1.375rem;
+    line-height: 1;
+    cursor: pointer;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+}
+.cu-cw-unpin:hover {
+    background: rgba(197,153,10,0.12);
+}
+.cu-cw-unpin.tv-focus-visible {
+    border-color: #f5c518;
+    border-color: var(--gold);
+    background: rgba(197,153,10,0.18);
+    box-shadow: 0 0 0 2px rgba(197,153,10,0.35);
+}
+#cu-archive {
+    -webkit-flex: 1;
+    flex: 1;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    overflow: hidden;
+}
+#cu-day-tabs {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-wrap: nowrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    padding: 0.875rem 1.5rem;
+    border-bottom: 1px solid #22222a;
+    border-bottom: var(--border);
+    background: #131316;
+    background: var(--bg2);
+    scrollbar-width: thin;
+    scrollbar-color: #242428 transparent;
+    scrollbar-color: var(--bg4) transparent;
+}
+#cu-day-tabs::-webkit-scrollbar {
+    height: 0.3125rem;
+}
+#cu-day-tabs::-webkit-scrollbar-thumb {
+    background: #242428;
+    background: var(--bg4);
+    border-radius: 0.1875rem;
+}
+.cu-day-tab {
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    margin-right: 0.625rem;
+    background: #242428;
+    background: var(--bg4);
+    border: 1px solid #22222a;
+    border: var(--border);
+    border-radius: 62.4375rem;
+    color: #80808c;
+    color: var(--text-dim);
+    font-size: 1.0625rem;
+    font-weight: 600;
+    padding: 0.6875rem 1.375rem;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.cu-day-tab:hover {
+    background: #2e2e34;
+    background: var(--bg5);
+    color: #f0f0f5;
+    color: var(--text);
+}
+.cu-day-tab.active {
+    background: #e5001e;
+    background: var(--accent);
+    border-color: #e5001e;
+    border-color: var(--accent);
+    color: #fff;
+}
+.cu-day-tab.tv-focus-visible {
+    outline: 3px solid #e5001e;
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+    color: #f0f0f5;
+    color: var(--text);
+}
+#cu-programme-list {
+    -webkit-flex: 1;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    padding: 0.5rem 0;
+    scrollbar-width: thin;
+    scrollbar-color: #242428 transparent;
+    scrollbar-color: var(--bg4) transparent;
+}
+#cu-programme-list::-webkit-scrollbar {
+    width: 0.375rem;
+}
+#cu-programme-list::-webkit-scrollbar-thumb {
+    background: #242428;
+    background: var(--bg4);
+    border-radius: 0.25rem;
+}
+.cu-prog-row {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    width: 100%;
+    padding: 1rem 2rem;
+    border-bottom: 1px solid #22222a;
+    border-bottom: var(--border);
+    cursor: pointer;
+    transition: background 0.12s;
+}
+.cu-prog-row:hover {
+    background: #131316;
+    background: var(--bg2);
+}
+.cu-prog-row.tv-focus-visible {
+    outline: 3px solid #e5001e !important;
+    outline: 3px solid var(--accent) !important;
+    outline-offset: -3px;
+    background: #131316;
+    background: var(--bg2);
+}
+.cu-prog-row.cu-row-active {
+    background: #131316;
+    background: var(--bg2);
+}
+.cu-prog-time {
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    width: 10.625rem;
+    font-size: 1.0625rem;
+    color: #80808c;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+}
+.cu-prog-title {
+    -webkit-flex: 1;
+    flex: 1;
+    min-width: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #f0f0f5;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cu-prog-pin {
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    margin: 0 0.875rem;
+    width: 2.75rem;
+    height: 2.75rem;
+    background: none;
+    border: 1.5px solid transparent;
+    border-radius: 0.625rem;
+    color: #4a4a56;
+    color: var(--text-faint);
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    transition: color 0.13s, background 0.13s, border-color 0.13s;
+}
+.cu-prog-pin:hover {
+    color: #f5c518;
+    color: var(--gold);
+    background: rgba(197,153,10,0.12);
+}
+.cu-prog-pin.active {
+    color: #f5c518;
+    color: var(--gold);
+}
+.cu-prog-pin.tv-focus-visible {
+    color: #f5c518;
+    color: var(--gold);
+    border-color: #f5c518;
+    border-color: var(--gold);
+    background: rgba(197,153,10,0.18);
+    box-shadow: 0 0 0 2px rgba(197,153,10,0.35);
+}
+.cu-prog-play {
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    font-size: 1.125rem;
+    color: #e5001e;
+    color: var(--accent);
+}
+#cu-placeholder {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0 2.5rem;
+    pointer-events: none;
+}
+#cu-placeholder-icon {
+    font-size: 4.5rem;
+    line-height: 1;
+    opacity: 0.45;
+    margin-bottom: 1.125rem;
+}
+#cu-placeholder-text {
+    font-size: 1.375rem;
+    color: #80808c;
+    color: var(--text-dim);
+    max-width: 35rem;
+    line-height: 1.45;
+}
+html.no-flex-gap:not(#_nfg1):not(#_nfg2) #cu-settings-btn {
+    margin-left: auto;
+}

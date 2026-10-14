@@ -20,6 +20,31 @@ var railObserver = 'IntersectionObserver' in window ? new IntersectionObserver(f
   root: elRails,
   rootMargin: '900px 0px'
 }) : null;
+
+/* The IntersectionObserver stand-in for webOS 3/4: fill any rail within a
+   screen of the visible area. Called on scroll and after the focus moves, so
+   the D-pad (which scrolls by focusing) and the pointer both reach it. */
+var RAIL_NEAR_PX = 900;
+function loadRailsNearView() {
+  if (railObserver) return;
+  var box = elRails.getBoundingClientRect();
+  var top = box.top - RAIL_NEAR_PX,
+    bottom = box.bottom + RAIL_NEAR_PX;
+  var rails = railEls();
+  for (var i = 0; i < rails.length; i++) {
+    var r = rails[i].getBoundingClientRect();
+    if (r.bottom < top) continue;
+    if (r.top > bottom) break;
+    if (rails[i].dataset.loaded === '0') fillRail(rails[i]);
+  }
+}
+if (!railObserver) {
+  var _railScrollTimer = null;
+  elRails.addEventListener('scroll', function () {
+    clearTimeout(_railScrollTimer);
+    _railScrollTimer = setTimeout(loadRailsNearView, 150);
+  });
+}
 function unloadRail(rail) {
   if (!rail || rail.dataset.loaded !== '1' || rail.dataset.keep === '1') return;
   var rails = railEls();
@@ -64,7 +89,7 @@ function fillRail(rail) {
     sk.className = 'vod-card vod-skeleton';
     track.appendChild(sk);
   }
-  fetchCached(ck, url).then(function (data) {
+  fetchCachedList(ck, url).then(function (data) {
     track.innerHTML = '';
     var items = Array.isArray(data) ? data : [];
     if (!items.length) {
@@ -140,14 +165,17 @@ function renderRails() {
     var isFavCat = Favourites.isCategory(activeType, c.category_id);
     var rail = makeRail((isFavCat ? '★  ' : '') + (c.category_name || 'Unnamed'), activeType, c.category_id);
     elRails.appendChild(rail);
-    if (railObserver) {
-      railObserver.observe(rail); // observer handles load + unload
-      if (i < 2) fillRail(rail); // eager top rails for instant paint
-    } else {
-      fillRail(rail); // no IO (old WebOS) → load all
-    }
+    if (railObserver) railObserver.observe(rail); // observer handles load + unload
+    /* Eager top rails for instant paint. Without IntersectionObserver
+       (webOS 3 and 4) this used to load EVERY rail up front — one
+       get_vod_streams per category, all at once: hundreds of parallel
+       requests on a large panel, every list cached into a storage quota
+       it could never fit. Those TVs now load rails as they come near the
+       screen instead; see loadRailsNearView(). */
+    if (i < 3) fillRail(rail);
   });
   if (!list.length && !cw.length) showStatus('Nothing here yet.', false);else hideStatus();
+  loadRailsNearView(); /* no-op where IntersectionObserver does this job */
   renderSidebarCats(); /* keep the sidebar category list in sync */
   /* After a (re)render from boot or a section switch, drop focus into the
      rails. Otherwise leave focus where it is (e.g. sidebar open). */
