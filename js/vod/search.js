@@ -66,8 +66,12 @@ function buildIndexInto(idx, arr, type) {
         var m = arr[i], id = type === 'series' ? m.series_id : m.stream_id;
         if (id === undefined || id === null) continue;
         var nm = m.name || m.title || '';
+        /* `ext` is the movie's file type — part of its stream URL. Without it
+           a result played as ".mp4" whatever the file really was. Kept in
+           step with addAll in vod-search-worker.js. */
         idx.push({ id: id, type: type, name: nm, lc: nm.toLowerCase(),
-                   icon: m.stream_icon || m.cover || m.cover_big || m.icon || '' });
+                   icon: m.stream_icon || m.cover || m.cover_big || m.icon || '',
+                   ext: m.container_extension || '' });
     }
 }
 function initFallbackSearch(movieUrl, seriesUrl) {
@@ -85,7 +89,8 @@ function mainThreadSearch(q) {
         var it = searchIndex[i];
         if (it.lc.indexOf(q) === -1) continue;
         if (it.type === 'series') out.push({ series_id: it.id, name: it.name, cover: it.icon, __type: 'series' });
-        else                      out.push({ stream_id: it.id, name: it.name, stream_icon: it.icon, __type: 'movie' });
+        else                      out.push({ stream_id: it.id, name: it.name, stream_icon: it.icon,
+                                             container_extension: it.ext, __type: 'movie' });
     }
     return out;
 }

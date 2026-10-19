@@ -81,6 +81,8 @@ function toggleWatchlist(item) {
     } else {
       entry.stream_id = item.stream_id;
       entry.stream_icon = posterOf(item);
+      /* Part of the stream URL — see playCurrentMovie. */
+      if (item.container_extension) entry.container_extension = item.container_extension;
     }
     w.unshift(entry);
   }

@@ -48,7 +48,12 @@
         type: type,
         name: nm,
         lc: nm.toLowerCase(),
-        icon: m.stream_icon || m.cover || m.cover_big || m.icon || ''
+        icon: m.stream_icon || m.cover || m.cover_big || m.icon || '',
+        /* The file type is part of a movie's stream URL. A result
+           without it played as ".mp4" whatever the file really was,
+           which is why titles that play from the rails failed from
+           search. Kept in step with buildIndexInto in vod/search.js. */
+        ext: m.container_extension || ''
       });
     }
   }
@@ -89,6 +94,7 @@
         stream_id: it.id,
         name: it.name,
         stream_icon: it.icon,
+        container_extension: it.ext,
         __type: 'movie'
       });
     }

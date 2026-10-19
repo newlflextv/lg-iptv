@@ -47,7 +47,11 @@ function toggleWatchlist(item) {
         var t = item.__type || (item.series_id ? 'series' : 'movie');
         var entry = { key: k, __type: t, name: titleOf(item), ts: Date.now() };
         if (t === 'series') { entry.series_id = item.series_id; entry.cover = posterOf(item); }
-        else { entry.stream_id = item.stream_id; entry.stream_icon = posterOf(item); }
+        else {
+            entry.stream_id = item.stream_id; entry.stream_icon = posterOf(item);
+            /* Part of the stream URL — see playCurrentMovie. */
+            if (item.container_extension) entry.container_extension = item.container_extension;
+        }
         w.unshift(entry);
     }
     saveWatchlist(w);

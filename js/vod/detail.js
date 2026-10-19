@@ -114,7 +114,15 @@ function lazyFetchVodInfo(item) {
                 });
             } catch (e) {}
             var info = (data && (data.info || data.movie_data)) || data || {};
-            item.container_extension = item.container_extension || info.container_extension;
+            /* The file type lives in `movie_data`, not `info` — Xtream puts the
+               TMDB metadata in `info` and the stream record in `movie_data`.
+               Reading it from `info` found nothing whenever `info` existed (on
+               almost every panel), so a title that arrived without its
+               extension — every search result, every My List entry — played
+               as ".mp4" and failed on anything else. */
+            var md = (data && data.movie_data) || {};
+            item.container_extension = item.container_extension || md.container_extension ||
+                                       info.container_extension || '';
             /* Kept for OpenSubtitles: an id matches far more reliably than a
                title string, which breaks on renames and release tags. */
             item._tmdb = info.tmdb_id || info.tmdb || '';
@@ -365,6 +373,21 @@ function playItem(meta) {
 function playCurrentMovie() {
     if (!detailItem) return;
     var item = detailItem;
+    /* The file type is part of the stream URL, so a title that arrived without
+       one (from an older index, or a My List entry) waits for the panel to say
+       what it is rather than guessing ".mp4" — the subtitle race below would
+       otherwise start playback after 2.5s with the guess. The lookup settles
+       either way, so this can't hang. */
+    if (!item.container_extension && item.stream_id) {
+        lazyFetchVodInfo(item).then(function () {
+            if (detailItem === item) startMovie(item);
+        });
+        return;
+    }
+    startMovie(item);
+}
+
+function startMovie(item) {
     var prog = loadProgress()['m:' + item.stream_id];
     var ext  = item.container_extension || 'mp4';
     playWhenSubsReady(item, function (subs) {
@@ -386,10 +409,15 @@ function playCurrentMovie() {
    only a sidecar look. */
 function resumePlay(entry) {
     var isEpisode = entry.type === 'episode';
+    /* For a movie, the panel's own answer about the file type wins over the
+       one saved with the progress: titles played from search before that was
+       fixed were saved as ".mp4" whatever they really were, and resuming them
+       failed the same way. */
+    var lookup = { stream_id: entry.id };
     var build = function (subs, extra) {
         var m = {
             type: isEpisode ? 'episode' : 'movie',
-            id: entry.id, ext: entry.ext,
+            id: entry.id, ext: (!isEpisode && lookup.container_extension) || entry.ext,
             name: entry.name, icon: entry.icon,
             series_id: entry.series_id, season: entry.season, episode: entry.episode,
             resume: entry.pos || 0,
@@ -403,7 +431,9 @@ function resumePlay(entry) {
         resumeEpisode(entry, build);
         return;
     }
-    playWhenSubsReady({ stream_id: entry.id }, build, buildMovieUrl(entry.id, entry.ext));
+    lazyFetchVodInfo(lookup).then(function () {
+        playWhenSubsReady(lookup, build, buildMovieUrl(entry.id, lookup.container_extension || entry.ext));
+    });
 }
 
 /* Resuming an episode has to rebuild the season alongside it. Continue Watching
