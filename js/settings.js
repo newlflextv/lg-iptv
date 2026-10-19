@@ -503,6 +503,9 @@
             refreshLastUsedHint();
             sel.addEventListener('change', function () {
                 saveRaw(PLAYER_PREF_KEY, sel.value);
+                /* Choosing an engine here is also the way to undo the one the
+                   player learned for live channels after a freeze. */
+                try { localStorage.removeItem('iptv_live_engine_hint'); } catch (e) {}
                 refreshLastUsedHint();
                 setStatus('player-pref-status', 'Saved — applies to the next stream you start.', 'ok', 4000);
             });
@@ -891,6 +894,20 @@
         if (unhandled && unhandled.length) {
             list.appendChild(diagRow('Unrecognised remote keys', unhandled.join(', '),
                 'Key codes seen on Live TV that nothing responds to'));
+        }
+
+        /* Live streams that froze mid-play and what the player did about it,
+           written by player/engine.js. Empty is the healthy state. */
+        var liveHint = loadRaw('iptv_live_engine_hint', '');
+        if (liveHint) {
+            list.appendChild(diagRow('Live channels start on', PLAYER_LABELS[liveHint] || liveHint,
+                'Learned after the native player froze — pick a player in Player to reset'));
+        }
+        var plog = load('iptv_playback_log', null);
+        if (plog && plog.length) {
+            list.appendChild(diagBlock('Playback freezes & recoveries', plog.map(function (e) {
+                return new Date(e.ts).toLocaleString() + '  ' + e.text;
+            }).join('\n'), 'Newest first'));
         }
 
         /* Whether the track APIs exist at all on this build. Existence is not

@@ -122,6 +122,26 @@ function _rememberTrack(key, what, value) {
     } catch (_) {}
 }
 
+/* ── Learned engine for live channels ────────────────────────────────────────
+   Set by the engine when the native player froze on a live channel and HLS.js
+   then carried that channel cleanly for a couple of minutes (see
+   LIVE_HINT_AFTER_MS in player/engine.js). Without it, every channel the user
+   had never opened would start native and freeze once before being rescued.
+   Only consulted for live channels with no memory of their own and no engine
+   chosen in Settings; choosing one there clears it. */
+var PLAYER_LIVE_HINT_KEY = "iptv_live_engine_hint";
+
+function _liveEngineHint() {
+    var v;
+    try { v = localStorage.getItem(PLAYER_LIVE_HINT_KEY) || ""; } catch (_) { return ""; }
+    return PLAYER_ENGINES.indexOf(v) !== -1 ? v : "";
+}
+
+function _rememberLiveEngine(kind) {
+    if (PLAYER_ENGINES.indexOf(kind) === -1) return;
+    try { localStorage.setItem(PLAYER_LIVE_HINT_KEY, kind); } catch (_) {}
+}
+
 // Resolves the stored preference to a `kind`, or "" meaning "use the automatic
 // order" (native → hls → ts, the historical behaviour).
 function _preferredEngine() {

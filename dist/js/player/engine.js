@@ -24,9 +24,41 @@ function _toPrimitive(t, r) { if ("object" != _typeof(t) || !t) return t; var e 
  * "Playing" = success; a stream that is actually running is never second-
  * guessed (an earlier decoded-frame heuristic falsely failed HDR playback). If
  * a stream plays but is black, the user cycles engines manually with RED.
+ * The one exception is a LIVE channel whose picture stops moving altogether
+ * after it was playing — see "Live freeze recovery" below.
  *
  * Remote: RED = cycle engine, GREEN = diagnostics, YELLOW = lowest quality.
  */
+
+/* ── Live freeze recovery ─────────────────────────────────────────────────────
+   A live HLS playlist only lists the last ~30s of the channel; the player has
+   to keep re-fetching it to get further. When that refresh stops working the
+   stream plays out what it had and then freezes — no error event, nothing for
+   the tier logic to react to — and the only way out used to be changing
+   channel by hand, which "fixed" it for another 30s. (Reported on webOS 26,
+   which plays live .m3u8 natively; see _recoverStall for what is tried.)
+
+   LIVE_STALL_MS is how long the picture may stand still before it counts as a
+   freeze rather than a rebuffer. LIVE_HINT_AFTER_MS is how long HLS.js must
+   run cleanly after rescuing a frozen native stream before the app concludes
+   that, on this TV, live channels should start on HLS.js. */
+var LIVE_STALL_MS = 8000;
+var LIVE_HINT_AFTER_MS = 120000;
+var PLAYBACK_LOG_KEY = "iptv_playback_log";
+
+/* Freezes and recoveries, newest first, for Settings → Diagnostics. The GREEN
+   overlay shows the current stream's history, but only while it is open — this
+   is what lets a "it froze earlier" report be checked after the fact. */
+function _logPlaybackEvent(text) {
+  if (typeof Store === "undefined") return;
+  var log = Store.get(PLAYBACK_LOG_KEY, []);
+  if (!Array.isArray(log)) log = [];
+  log.unshift({
+    ts: Date.now(),
+    text: text
+  });
+  Store.set(PLAYBACK_LOG_KEY, log.slice(0, 10));
+}
 
 /* Where the loaded subtitles came from, or why there are none — the companion
    to the episode line, and the answer to "why are there no subtitles" that used
@@ -312,7 +344,7 @@ var IPTVPlayer = /*#__PURE__*/function () {
         frames = this._decodedFrames();
       var audio = this.listAudioTracks();
       var subs = this.listSubtitles();
-      this._diagEl.textContent = ["engine  : " + (this._activeEngine || "—") + (this._manual ? " (manual)" : "") + "   tier " + ((this._attemptIdx || 0) + 1) + "/" + (this._attempts && this._attempts.length || 1), "res     : " + (v.videoWidth || 0) + "×" + (v.videoHeight || 0), "codec   : " + (this._codecs ? (this._codecs.v || "?") + " / " + (this._codecs.a || "?") : "n/a (native)"), "time    : " + (v.currentTime || 0).toFixed(1) + (isFinite(v.duration) ? " / " + v.duration.toFixed(1) : " (live)") + "   paused:" + v.paused + "   muted:" + v.muted + (this._autoMuted ? " (autoplay)" : ""), "ready   : " + v.readyState + "   network:" + v.networkState, "frames  : " + (frames < 0 ? "n/a" : frames), "audio   : " + this._trackSummary(audio, v.audioTracks, typeof v.audioTracks !== "undefined"), "subs    : " + this._trackSummary(subs, v.textTracks, typeof v.textTracks !== "undefined"), "source  : " + this._sourceDesc(), "sub adj : delay " + this.getSubDelay().toFixed(2) + "s   pos " + this.getSubPosition(), "episode : " + _episodeDiag(), "sub src : " + _subsDiag(), "error   : " + (v.error ? _mediaErrText(v.error) : "—"), "lowQ    : " + (this._lowQuality ? "on" : "off"), "tried   : " + (this._diag && this._diag.length ? this._diag.join(" | ") : "—"), "", "(RED cycle · GREEN close · YELLOW lowest)"].join("\n");
+      this._diagEl.textContent = ["engine  : " + (this._activeEngine || "—") + (this._manual ? " (manual)" : "") + "   tier " + ((this._attemptIdx || 0) + 1) + "/" + (this._attempts && this._attempts.length || 1), "res     : " + (v.videoWidth || 0) + "×" + (v.videoHeight || 0), "codec   : " + (this._codecs ? (this._codecs.v || "?") + " / " + (this._codecs.a || "?") : "n/a (native)"), "time    : " + (v.currentTime || 0).toFixed(1) + (isFinite(v.duration) ? " / " + v.duration.toFixed(1) : " (live)") + "   paused:" + v.paused + "   muted:" + v.muted + (this._autoMuted ? " (autoplay)" : ""), "ready   : " + v.readyState + "   network:" + v.networkState, "frames  : " + (frames < 0 ? "n/a" : frames), "audio   : " + this._trackSummary(audio, v.audioTracks, typeof v.audioTracks !== "undefined"), "subs    : " + this._trackSummary(subs, v.textTracks, typeof v.textTracks !== "undefined"), "source  : " + this._sourceDesc(), "sub adj : delay " + this.getSubDelay().toFixed(2) + "s   pos " + this.getSubPosition(), "episode : " + _episodeDiag(), "sub src : " + _subsDiag(), "error   : " + (v.error ? _mediaErrText(v.error) : "—"), "lowQ    : " + (this._lowQuality ? "on" : "off"), "freezes : " + (this._stalls || 0) + (this._stallEscalated ? "   (native → HLS.js tried)" : "") + (_liveEngineHint() ? "   live starts on: " + _liveEngineHint() : ""), "tried   : " + (this._diag && this._diag.length ? this._diag.join(" | ") : "—"), "", "(RED cycle · GREEN close · YELLOW lowest)"].join("\n");
     }
 
     // ── Engine plumbing ─────────────────────────────────────────────────────────
@@ -337,6 +369,7 @@ var IPTVPlayer = /*#__PURE__*/function () {
   }, {
     key: "_resetVideo",
     value: function _resetVideo() {
+      this._stopStallWatch();
       this._dropAttemptListeners();
       try {
         this.video.pause();
@@ -482,6 +515,9 @@ var IPTVPlayer = /*#__PURE__*/function () {
       this._diag = [];
       this._codecs = null;
       this._res = "";
+      this._stalls = 0;
+      this._stallEscalated = false; // native → HLS.js already tried for a freeze
+      this._stallFallback = -1; // attempt to return to if that didn't help
       this._attempts = this._buildAttempts(urls);
       this._attemptIdx = 0;
       this._runAttempt(gen);
@@ -557,8 +593,10 @@ var IPTVPlayer = /*#__PURE__*/function () {
     key: "_applyEnginePreference",
     value: function _applyEnginePreference(list) {
       // What actually worked here last time beats the global default, which is
-      // only a starting guess for content we've never played.
-      var want = _recalledEngine(this._contentKey) || _preferredEngine();
+      // only a starting guess for content we've never played. Last comes what
+      // this TV has taught us about live channels (see _liveEngineHint).
+      var isLive = String(this._contentKey || "").indexOf("ch:") === 0;
+      var want = _recalledEngine(this._contentKey) || _preferredEngine() || (isLive ? _liveEngineHint() : "");
       if (!want || list.length < 2) return list;
       var preferred = list.filter(function (a) {
         return a.kind === want;
@@ -580,6 +618,7 @@ var IPTVPlayer = /*#__PURE__*/function () {
         return;
       }
       var tok = this._tok;
+      this._stopStallWatch();
       this._dropAttemptListeners();
       this._activeEngine = a.label;
       this._playingSince = 0; // set on 'playing'; drives mid-play recovery
@@ -599,10 +638,23 @@ var IPTVPlayer = /*#__PURE__*/function () {
     value: function _next(gen, reason) {
       if (gen !== this._gen) return;
       this._clearWatchdog();
+      this._stopStallWatch();
       if (reason) this._diag.push(reason);
       if (this._manual) return;
       this._tok++;
       this.destroyHls();
+      /* HLS.js was brought in to rescue a frozen native stream and couldn't
+         even start. Go back to the engine that WAS playing rather than on
+         down the tier list — a stream that plays with the odd freeze beats
+         an error banner. */
+      if (this._stallFallback >= 0 && !this._playingSince) {
+        var back = this._stallFallback;
+        this._stallFallback = -1;
+        this._diag.push("HLS.js didn't start — back to " + this._attempts[back].label);
+        this._attemptIdx = back;
+        this._runAttempt(gen);
+        return;
+      }
       if (this._playingSince && Date.now() - this._playingSince > 5000) {
         this._diag.push("reconnect " + this._activeEngine);
         this._msg("Reconnecting…");
@@ -623,6 +675,7 @@ var IPTVPlayer = /*#__PURE__*/function () {
     value: function cycleEngine() {
       if (!this._lastUrl || !this._attempts || this._attempts.length < 2) return;
       this._manual = true;
+      this._stallFallback = -1; // the user is choosing engines now
       var gen = ++this._gen;
       this._tok++;
       this._clearWatchdog();
@@ -670,9 +723,13 @@ var IPTVPlayer = /*#__PURE__*/function () {
       if (this._manual) return;
       var self = this,
         v = this.video;
+      var t0 = v.currentTime || 0;
       this._watchdog = setTimeout(function () {
         if (!self._alive(gen, tok)) return;
-        if (!v.paused && v.readyState >= 3 && v.currentTime > 0) {
+        /* Judged by the clock having moved, not by readyState: platform
+           pipelines don't all keep readyState current, and a stream that
+           is visibly running must never be torn down for a stale flag. */
+        if (!v.paused && (v.currentTime > t0 + 0.5 || v.readyState >= 3 && v.currentTime > 0)) {
           self._onPlaying();
           return;
         }
@@ -703,7 +760,7 @@ var IPTVPlayer = /*#__PURE__*/function () {
           v.removeEventListener("timeupdate", _onTime);
           return;
         }
-        if (v.paused || v.readyState < 3) {
+        if (v.paused || v.seeking || v.readyState < 2) {
           lastT = -1;
           return;
         }
@@ -733,9 +790,116 @@ var IPTVPlayer = /*#__PURE__*/function () {
       this._clearWatchdog();
       this._hideMsg();
       this._playingSince = Date.now();
+      this._stallFallback = -1;
       var a = this._attempts && this._attempts[this._attemptIdx];
       if (a) _rememberEngine(this._contentKey, a.kind);
+      this._startStallWatch(this._gen, this._tok);
       if (typeof this.onPlaying === "function") this.onPlaying();
+    }
+
+    /* ── Live freeze detection ───────────────────────────────────────────────
+       Once a live channel is playing, check every second that it is still
+       moving: the clock advancing, or frames still being decoded. Paused,
+       seeking, ended and a hidden page don't count. Only judged once the clock
+       has been SEEN to move on this attempt — a pipeline whose currentTime
+       never updates would otherwise read as frozen from the first second and
+       be restarted every eight. VOD and catch-up are left alone: a pause in
+       buffering there is the network, and restarting would lose the position. */
+  }, {
+    key: "_startStallWatch",
+    value: function _startStallWatch(gen, tok) {
+      this._stopStallWatch();
+      if (String(this._contentKey || "").indexOf("ch:") !== 0) return;
+      var self = this,
+        v = this.video;
+      var a = this._attempts && this._attempts[this._attemptIdx];
+      var since = Date.now();
+      var lastT = v.currentTime,
+        lastF = this._decodedFrames(),
+        lastMove = since,
+        clockSeen = false;
+      this._stallTimer = setInterval(function () {
+        if (!self._alive(gen, tok)) {
+          self._stopStallWatch();
+          return;
+        }
+        var now = Date.now();
+        if (v.paused || v.ended || v.seeking || document.hidden) {
+          lastMove = now;
+          lastT = v.currentTime;
+          return;
+        }
+        var t = v.currentTime,
+          f = self._decodedFrames();
+        var clockMoved = Math.abs(t - lastT) > 0.05;
+        var framesMoved = f >= 0 && lastF >= 0 && f > lastF;
+        lastT = t;
+        lastF = f;
+        if (clockMoved) clockSeen = true;
+        if (clockMoved || framesMoved) {
+          lastMove = now;
+          /* HLS.js has now carried a channel the native player froze on
+             for a good while: on this TV, start live channels there. */
+          if (self._stallEscalated && !self._hintSaved && a && a.kind === "hls" && now - since > LIVE_HINT_AFTER_MS) {
+            self._hintSaved = true;
+            _rememberLiveEngine("hls");
+            _logPlaybackEvent("HLS.js ran " + Math.round(LIVE_HINT_AFTER_MS / 60000) + " min without freezing — live channels now start on HLS.js");
+          }
+          return;
+        }
+        if (clockSeen && now - lastMove >= LIVE_STALL_MS) {
+          self._stopStallWatch();
+          self._recoverStall(gen, now - lastMove);
+        }
+      }, 1000);
+    }
+  }, {
+    key: "_stopStallWatch",
+    value: function _stopStallWatch() {
+      if (this._stallTimer) {
+        clearInterval(this._stallTimer);
+        this._stallTimer = null;
+      }
+    }
+
+    /* A frozen live stream. The first freeze on the native player moves the
+       same URL to HLS.js, which re-fetches the live playlist itself instead of
+       leaving it to the TV's pipeline — the likeliest thing to have broken.
+       Anything else (HLS.js frozen too, the TS tier, a second freeze, manual
+       mode) restarts the same engine at the live edge: exactly what changing
+       channel and back was doing by hand, without the trip. */
+  }, {
+    key: "_recoverStall",
+    value: function _recoverStall(gen, stalledMs) {
+      if (gen !== this._gen) return;
+      var a = this._attempts && this._attempts[this._attemptIdx];
+      if (!a) return;
+      this._stalls = (this._stalls || 0) + 1;
+      this._clearWatchdog();
+      this._tok++;
+      this.destroyHls();
+      var target = this._attemptIdx;
+      if (!this._manual && a.kind === "native" && !this._stallEscalated) {
+        var idx = this._attempts.findIndex(function (x) {
+          return x.kind === "hls" && x.url === a.url;
+        });
+        if (idx >= 0) {
+          this._stallEscalated = true;
+          this._stallFallback = this._attemptIdx;
+          target = idx;
+        }
+      }
+      var action = target === this._attemptIdx ? "restarting " + a.label : "switching to " + this._attempts[target].label;
+      var note = a.label + " froze at " + Math.round(this.video.currentTime || 0) + "s (" + Math.round(stalledMs / 1000) + "s without progress) — " + action;
+      this._diag.push(note);
+      _logPlaybackEvent(note + (this._contentKey ? "  [" + this._contentKey + "]" : ""));
+      this._msg("Reconnecting…");
+      this._attemptIdx = target;
+      var self = this,
+        tok = this._tok;
+      setTimeout(function () {
+        if (gen === self._gen && tok === self._tok) self._runAttempt(gen);
+      }, 500);
     }
   }, {
     key: "_playNative",
